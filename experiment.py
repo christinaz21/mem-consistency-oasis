@@ -161,7 +161,7 @@ class VideoPredictionExperiment:
         trainer = pl.Trainer(
             accelerator="auto",
             logger=self.logger if self.logger else False,
-            devices=-1,
+            devices=self.cfg.training.devices,
             num_nodes=self.cfg.num_nodes,
             strategy=DDPStrategy(find_unused_parameters=False) if torch.cuda.device_count() > 1 else "auto",
             callbacks=callbacks,

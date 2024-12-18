@@ -12,6 +12,7 @@ training:
   max_steps: -1 # set to -1 to train forever, will override max_epochs
   max_time: null # set to something like "00:12:00:00" to enable
   log_every_n_steps: 50 # log loss every n train steps
+  devices: [0]
   data:
     num_workers: 8 # number of CPU threads for data preprocessing.
     shuffle: True # whether training data will be shuffled

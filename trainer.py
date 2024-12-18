@@ -26,26 +26,20 @@ class DiffusionForcingVideo(pl.LightningModule):
         super().__init__()
         self.cfg = cfg
         self.x_shape = cfg.x_shape
-        self.frame_stack = cfg.frame_stack
-        self.x_stacked_shape = list(self.x_shape)
-        self.x_stacked_shape[0] *= cfg.frame_stack
-        self.guidance_scale = cfg.guidance_scale
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
-        self.causal = cfg.causal
 
-        self.uncertainty_scale = cfg.uncertainty_scale
         self.timesteps = cfg.diffusion.timesteps
         self.sampling_timesteps = cfg.diffusion.sampling_timesteps
         self.clip_noise = cfg.diffusion.clip_noise
         self.stabilization_level = cfg.diffusion.stabilization_level
 
-        self.cum_snr_decay = self.cfg.diffusion.cum_snr_decay ** (self.frame_stack * cfg.frame_skip)
+        self.cum_snr_decay = self.cfg.diffusion.cum_snr_decay ** cfg.frame_skip
 
         self.validation_step_outputs = []
         self.metrics = cfg.metrics
-        self.n_tokens = cfg.n_frames // cfg.frame_stack  # number of max tokens for the model
+        self.n_frames = cfg.n_frames  # number of max tokens for the model
 
         self.snr_clip = cfg.diffusion.snr_clip
         
@@ -205,7 +199,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         curr_frame = 0
 
         # context
-        n_context_frames = self.context_frames // self.frame_stack
+        n_context_frames = self.context_frames
         xs_pred = xs[:n_context_frames].clone()
         curr_frame += n_context_frames
 
@@ -215,15 +209,15 @@ class DiffusionForcingVideo(pl.LightningModule):
                 horizon = min(n_frames - curr_frame, self.chunk_size)
             else:
                 horizon = n_frames - curr_frame
-            assert horizon <= self.n_tokens, "horizon exceeds the number of tokens."
+            assert horizon <= self.n_frames, "horizon exceeds the number of tokens."
             scheduling_matrix = self._generate_scheduling_matrix(horizon)
 
-            chunk = torch.randn((horizon, batch_size, *self.x_stacked_shape), device=self.device)
+            chunk = torch.randn((horizon, batch_size, *self.x_shape), device=self.device)
             chunk = torch.clamp(chunk, -self.clip_noise, self.clip_noise)
             xs_pred = torch.cat([xs_pred, chunk], 0)
 
-            # sliding window: only input the last n_tokens frames
-            start_frame = max(0, curr_frame + horizon - self.n_tokens)
+            # sliding window: only input the last n_frames frames
+            start_frame = max(0, curr_frame + horizon - self.n_frames)
 
             pbar.set_postfix(
                 {
@@ -386,13 +380,11 @@ class DiffusionForcingVideo(pl.LightningModule):
         Generate noise levels for training.
         """
         num_frames, batch_size, *_ = xs.shape
-        match self.cfg.noise_level:
-            case "random_all":  # entirely random noise levels
-                noise_levels = torch.randint(0, self.timesteps, (num_frames, batch_size), device=xs.device)
+        noise_levels = torch.randint(0, self.timesteps, (num_frames, batch_size), device=xs.device)
 
         if masks is not None:
             # for frames that are not available, treat as full noise
-            discard = torch.all(~rearrange(masks.bool(), "(t fs) b -> t b fs", fs=self.frame_stack), -1)
+            discard = ~masks.bool()
             noise_levels = torch.where(discard, torch.full_like(noise_levels, self.timesteps - 1), noise_levels)
 
         return noise_levels
@@ -408,13 +400,11 @@ class DiffusionForcingVideo(pl.LightningModule):
 
     def reweight_loss(self, loss, weight=None):
         # Note there is another part of loss reweighting (fused_snr) inside the Diffusion class!
-        loss = rearrange(loss, "t b (fs c) ... -> t b fs c ...", fs=self.frame_stack)
         if weight is not None:
-            expand_dim = len(loss.shape) - len(weight.shape) - 1
+            expand_dim = len(loss.shape) - len(weight.shape)
             weight = rearrange(
                 weight,
-                "(t fs) b ... -> t b fs ..." + " 1" * expand_dim,
-                fs=self.frame_stack,
+                "t b ... -> t b ..." + " 1" * expand_dim,
             )
             loss = loss * weight
 
@@ -424,23 +414,17 @@ class DiffusionForcingVideo(pl.LightningModule):
         xs = batch[0]
         batch_size, n_frames = xs.shape[:2]
 
-        if n_frames % self.frame_stack != 0:
-            raise ValueError("Number of frames must be divisible by frame stack size")
-        if self.context_frames % self.frame_stack != 0:
-            raise ValueError("Number of context frames must be divisible by frame stack size")
-
         masks = torch.ones(n_frames, batch_size).to(self.device)
-        n_frames = n_frames // self.frame_stack
 
         if self.external_cond_dim:
             conditions = batch[1]
             conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
-            conditions = rearrange(conditions, "b (t fs) d -> t b (fs d)", fs=self.frame_stack).contiguous()
+            conditions = rearrange(conditions, "b t d -> t b d").contiguous()
         else:
             conditions = None
 
         xs = self._normalize_x(xs)
-        xs = rearrange(xs, "b (t fs) c ... -> t b (fs c) ...", fs=self.frame_stack).contiguous()
+        xs = rearrange(xs, "b t c ... -> t b c ...").contiguous()
 
         return xs, conditions, masks
 
@@ -457,5 +441,4 @@ class DiffusionForcingVideo(pl.LightningModule):
         return xs * std + mean
 
     def _unstack_and_unnormalize(self, xs):
-        xs = rearrange(xs, "t b (fs c) ... -> (t fs) b c ...", fs=self.frame_stack)
         return self._unnormalize_x(xs)
