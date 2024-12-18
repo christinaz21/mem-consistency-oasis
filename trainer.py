@@ -21,6 +21,23 @@ from deepspeed.ops.adam import DeepSpeedCPUAdam
 
 from dit import DiT
 
+class WarmUpScheduler:
+    def __init__(self, optimizer, cfg):
+        self.optimizer = optimizer
+        self.cfg = cfg
+
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+
+    def load_state_dict(self, state_dict) -> None:
+        self.__dict__.update(state_dict)
+
+    def step(self, step):
+        if step < self.cfg.warmup_steps:
+            lr_scale = min(1.0, float(step + 1) / self.cfg.warmup_steps)
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = lr_scale * self.cfg.lr
+
 
 class DiffusionForcingVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig):
@@ -86,6 +103,8 @@ class DiffusionForcingVideo(pl.LightningModule):
                 external_cond_dim=self.external_cond_dim,
                 max_frames=self.cfg.n_frames,
             )
+        else:
+            raise ValueError(f"Unsupported model {self.model_cfg._name}.")
         self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         self.validation_fid_model = FrechetInceptionDistance(feature=64) if "fid" in self.metrics else None
@@ -118,23 +137,31 @@ class DiffusionForcingVideo(pl.LightningModule):
             optimizer_dynamics = torch.optim.AdamW(
                 params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
+            return optimizer_dynamics
         elif self.cfg.strategy == "deepspeed":
             optimizer_dynamics = DeepSpeedCPUAdam(
                 params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
+            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            return {
+                "optimizer": optimizer_dynamics,
+                "lr_scheduler": scheduler,
+            }
         else:
             raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
-        return optimizer_dynamics
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
         # update params
         optimizer.step(closure=optimizer_closure)
         
         # manually warm up lr without a scheduler
-        if self.trainer.global_step < self.cfg.warmup_steps:
-            lr_scale = min(1.0, float(self.trainer.global_step + 1) / self.cfg.warmup_steps)
-            for pg in optimizer.param_groups:
-                pg["lr"] = lr_scale * self.cfg.lr
+        # if self.trainer.global_step < self.cfg.warmup_steps:
+        #     lr_scale = min(1.0, float(self.trainer.global_step + 1) / self.cfg.warmup_steps)
+        #     for pg in optimizer.param_groups:
+        #         pg["lr"] = lr_scale * self.cfg.lr
+
+    def lr_scheduler_step(self, scheduler, metric):
+        scheduler.step(step=self.trainer.global_step)
 
     def compute_loss_weights(self, noise_levels: torch.Tensor):
         snr = self.snr[noise_levels]
