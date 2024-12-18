@@ -137,28 +137,20 @@ class DiffusionForcingVideo(pl.LightningModule):
             optimizer_dynamics = torch.optim.AdamW(
                 params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            return optimizer_dynamics
+            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         elif self.cfg.strategy == "deepspeed":
             optimizer_dynamics = DeepSpeedCPUAdam(
                 params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
             scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
-            return {
-                "optimizer": optimizer_dynamics,
-                "lr_scheduler": scheduler,
-            }
+            return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         else:
             raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
         # update params
         optimizer.step(closure=optimizer_closure)
-        
-        # manually warm up lr without a scheduler
-        # if self.trainer.global_step < self.cfg.warmup_steps:
-        #     lr_scale = min(1.0, float(self.trainer.global_step + 1) / self.cfg.warmup_steps)
-        #     for pg in optimizer.param_groups:
-        #         pg["lr"] = lr_scale * self.cfg.lr
 
     def lr_scheduler_step(self, scheduler, metric):
         scheduler.step(step=self.trainer.global_step)
