@@ -17,14 +17,16 @@ from utils import FrechetVideoDistance, get_validation_metrics_for_videos, log_v
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
+from deepspeed.ops.adam import DeepSpeedCPUAdam
 
 from dit import DiT
 
 
 class DiffusionForcingVideo(pl.LightningModule):
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, model_cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
+        self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
@@ -71,18 +73,19 @@ class DiffusionForcingVideo(pl.LightningModule):
 
 
     def _build_model(self):
-        self.diffusion_model = DiT(
-            input_h=self.cfg.diffusion.architecture.resolution,
-            input_w=self.cfg.diffusion.architecture.resolution,
-            patch_size=2,
-            in_channels=3,
-            hidden_size=256,
-            depth=16,
-            num_heads=16,
-            mlp_ratio=4.0,
-            external_cond_dim=self.external_cond_dim,
-            max_frames=self.cfg.n_frames,
-        )
+        if "dit" in self.model_cfg._name:
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+            )
         self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         self.validation_fid_model = FrechetInceptionDistance(feature=64) if "fid" in self.metrics else None
@@ -111,9 +114,16 @@ class DiffusionForcingVideo(pl.LightningModule):
 
     def configure_optimizers(self):
         params = tuple(self.diffusion_model.parameters())
-        optimizer_dynamics = torch.optim.AdamW(
-            params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
-        )
+        if self.cfg.strategy == "ddp":
+            optimizer_dynamics = torch.optim.AdamW(
+                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            )
+        elif self.cfg.strategy == "deepspeed":
+            optimizer_dynamics = DeepSpeedCPUAdam(
+                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            )
+        else:
+            raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
         return optimizer_dynamics
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):

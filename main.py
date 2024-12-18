@@ -65,6 +65,8 @@ def run_local(cfg: DictConfig):
             cfg.dataset._name = cfg_choice["dataset"]
         if cfg_choice["algorithm"] is not None:
             cfg.algorithm._name = cfg_choice["algorithm"]
+        if cfg_choice["model"] is not None:
+            cfg.model._name = cfg_choice["model"]
 
     # Set up the output directory.
     output_dir = Path(hydra_cfg.runtime.output_dir)

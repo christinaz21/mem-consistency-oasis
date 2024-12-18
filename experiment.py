@@ -8,6 +8,7 @@ import os
 import hydra
 import torch
 from lightning.pytorch.strategies.ddp import DDPStrategy
+from lightning.pytorch.strategies.deepspeed import DeepSpeedStrategy
 
 import lightning.pytorch as pl
 from lightning.pytorch.loggers.wandb import WandbLogger
@@ -65,7 +66,7 @@ class VideoPredictionExperiment:
                 "Make sure you define compatible_algorithms correctly and make sure that each key has "
                 "same name as yaml file under '[project_root]/configurations/algorithm' without .yaml suffix"
             )
-        return self.compatible_algorithms[algo_name](self.root_cfg.algorithm)
+        return self.compatible_algorithms[algo_name](self.root_cfg.algorithm, self.root_cfg.model)
 
     def exec_task(self, task: str) -> None:
         """
@@ -158,12 +159,24 @@ class VideoPredictionExperiment:
                     **self.cfg.training.checkpointing,
                 )
             )
+        if torch.cuda.device_count() == 1:
+            training_strategy = "auto"
+        elif self.cfg.training.strategy == "ddp":
+            training_strategy = DDPStrategy(find_unused_parameters=False)
+        elif self.cfg.training.strategy == "deepspeed":
+            training_strategy = DeepSpeedStrategy(
+                stage=3,
+                offload_optimizer=True,
+                offload_parameters=True,
+            )
+        else:
+            raise ValueError(f"Unknown strategy {self.cfg.training.strategy}")
         trainer = pl.Trainer(
             accelerator="auto",
             logger=self.logger if self.logger else False,
             devices=self.cfg.training.devices,
             num_nodes=self.cfg.num_nodes,
-            strategy=DDPStrategy(find_unused_parameters=False) if torch.cuda.device_count() > 1 else "auto",
+            strategy=training_strategy,
             callbacks=callbacks,
             gradient_clip_val=self.cfg.training.optim.gradient_clip_val,
             val_check_interval=self.cfg.validation.val_every_n_step,

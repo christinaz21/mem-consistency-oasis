@@ -1,0 +1,9 @@
+network_size: 64
+attn_heads: 4
+attn_dim_head: 64
+dim_mults: [1, 2, 4, 8]
+resolution: ${dataset.resolution}
+attn_resolutions: [16, 32, 64, 128]
+use_init_temporal_attn: True
+use_linear_attn: True
+time_emb_type: rotary

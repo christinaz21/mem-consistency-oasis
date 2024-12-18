@@ -5,14 +5,15 @@ num_nodes: 1 # number of gpu servers used in large scale distributed training
 
 training:
   lr: 8e-5
-  precision: 16-mixed # set float precision, 16-mixed is faster while 32 is more stable
+  precision: 32 # set float precision, 16-mixed is faster while 32 is more stable
   compile: False # whether to compile the model with torch.compile
   batch_size: 8 # training batch size; effective batch size is this number * gpu * nodes iff using distributed training
   max_epochs: 5 # set to -1 to train forever
   max_steps: -1 # set to -1 to train forever, will override max_epochs
   max_time: null # set to something like "00:12:00:00" to enable
   log_every_n_steps: 50 # log loss every n train steps
-  devices: [0]
+  devices: -1
+  strategy: ddp # deepspeed or ddp
   data:
     num_workers: 8 # number of CPU threads for data preprocessing.
     shuffle: True # whether training data will be shuffled
