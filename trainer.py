@@ -45,6 +45,8 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
+        if self.cfg.vae_ckpt:
+            self.x_shape = [16, 18, 32]
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim

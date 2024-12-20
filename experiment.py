@@ -105,6 +105,7 @@ class VideoPredictionExperiment:
                 num_workers=min(os.cpu_count(), self.cfg.training.data.num_workers),
                 shuffle=shuffle,
                 persistent_workers=True,
+                drop_last=True,
             )
         else:
             return None

@@ -48,4 +48,4 @@ def check_load():
     print(video.shape)
 
 if __name__ == "__main__":
-    check_load()
+    print(os.cpu_count())
