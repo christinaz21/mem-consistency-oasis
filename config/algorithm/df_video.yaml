@@ -12,6 +12,9 @@ chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion ch
 n_frames: ${dataset.n_frames}
 frame_skip: ${dataset.frame_skip}
 
+vae_ckpt: /data/taiye/Project/open-oasis/models/oasis500m/vit-l-20.safetensors
+scaling_factor: 0.07843137255
+
 # training hyperparameters
 weight_decay: 2e-3
 warmup_steps: 10000
@@ -28,7 +31,7 @@ diffusion:
   cum_snr_decay: 0.96
   clip_noise: 6.
   # sampling
-  sampling_timesteps: 100 # fixme, numer of diffusion steps, should be increased
+  sampling_timesteps: 40 # fixme, numer of diffusion steps, should be increased
   stabilization_level: 15
 
 metrics:

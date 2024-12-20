@@ -1,8 +1,8 @@
-input_h: ${dataset.resolution}
-input_w: ${dataset.resolution}
+input_h: 18
+input_w: 32
 patch_size: 2
-in_channels: 3
-hidden_size: 256
+in_channels: 16
+hidden_size: 1024
 depth: 16
 num_heads: 16
 mlp_ratio: 4.0

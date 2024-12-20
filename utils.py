@@ -10,7 +10,7 @@ from torchvision.io import read_image, read_video
 from torchvision.transforms.functional import resize
 from einops import rearrange
 from typing import Mapping, Sequence, Tuple, Optional
-
+import json
 
 def sigmoid_beta_schedule(timesteps, start=-3, end=3, tau=1, clamp_min=1e-5):
     """
@@ -500,3 +500,8 @@ def extract(a, t, x_shape):
     f, b = t.shape
     out = a[t]
     return out.reshape(f, b, *((1,) * (len(x_shape) - 2)))
+
+def parse_VPT_action(line:str):
+    data = json.loads(line)
+    actions = []
+    

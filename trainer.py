@@ -61,6 +61,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.n_frames = cfg.n_frames  # number of max tokens for the model
 
         self.snr_clip = cfg.diffusion.snr_clip
+        self.scaling_factor = cfg.scaling_factor
         
         self._build_model()
         self._build_buffer()
@@ -105,6 +106,26 @@ class DiffusionForcingVideo(pl.LightningModule):
             )
         else:
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
+        
+        if self.cfg.vae_ckpt:
+            from vae import AutoencoderKL
+            from safetensors.torch import load_model
+            self.vae = AutoencoderKL(
+                latent_dim=16,
+                patch_size=20,
+                enc_dim=1024,
+                enc_depth=6,
+                enc_heads=16,
+                dec_dim=1024,
+                dec_depth=12,
+                dec_heads=16,
+                input_height=360,
+                input_width=640,
+            )
+            load_model(self.vae, self.cfg.vae_ckpt)
+            self.vae.eval()
+        else:
+            self.vae = None
         self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         self.validation_fid_model = FrechetInceptionDistance(feature=64) if "fid" in self.metrics else None
@@ -182,6 +203,8 @@ class DiffusionForcingVideo(pl.LightningModule):
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         xs, conditions, masks = self._preprocess_batch(batch)
+        xs_gt = xs.clone()
+        xs = self.vae_encode(xs)
         noise = torch.randn_like(xs)
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
         noise_levels = self._generate_noise_levels(xs, masks)
@@ -189,7 +212,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         model_pred = self.diffusion_model(
             x=rearrange(noised_x, "t b ... -> b t ..."),
             t=rearrange(noise_levels, "t b -> b t"),
-            external_cond=rearrange(conditions, "t b ... -> b t ..."),
+            external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
 
@@ -202,13 +225,14 @@ class DiffusionForcingVideo(pl.LightningModule):
         # log the loss
         self.log("training/loss", loss, prog_bar=True)
 
-        xs = self._unstack_and_unnormalize(xs)
-        model_pred = self._unstack_and_unnormalize(model_pred)
+        xs_gt = self._unnormalize_x(xs_gt)
+        model_pred = self.vae_decode(model_pred)
+        model_pred = self._unnormalize_x(model_pred)
 
         output_dict = {
             "loss": loss,
             "xs_pred": model_pred,
-            "xs": xs,
+            "xs": xs_gt,
         }
         if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger:
             log_video(
@@ -223,6 +247,8 @@ class DiffusionForcingVideo(pl.LightningModule):
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
         xs, conditions, masks = self._preprocess_batch(batch)
+        xs_gt = xs.clone()
+        xs = self.vae_encode(xs)
         n_frames, batch_size, *_ = xs.shape
         xs_pred = []
         curr_frame = 0
@@ -275,7 +301,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 # input frames within the sliding window
                 xs_pred[start_frame:] = self.sample_step(
                     xs_pred[start_frame:],
-                    conditions[start_frame : curr_frame + horizon],
+                    conditions[start_frame : curr_frame + horizon] if conditions is not None else None,
                     from_noise_levels[start_frame:],
                     to_noise_levels[start_frame:],
                 )
@@ -287,9 +313,11 @@ class DiffusionForcingVideo(pl.LightningModule):
         loss = F.mse_loss(xs_pred, xs, reduction="none")
         loss = self.reweight_loss(loss, masks)
 
-        xs = self._unstack_and_unnormalize(xs)
-        xs_pred = self._unstack_and_unnormalize(xs_pred)
-        self.validation_step_outputs.append((xs_pred.detach().cpu(), xs.detach().cpu()))
+
+        xs_gt = self._unnormalize_x(xs_gt)
+        xs_pred = self.vae_decode(xs_pred)
+        xs_pred = self._unnormalize_x(xs_pred)
+        self.validation_step_outputs.append((xs_pred.detach().cpu(), xs_gt.detach().cpu()))
 
         return loss
 
@@ -301,6 +329,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             self.sqrt_recipm1_alphas_cumprod, t, x_t.shape
         )
 
+    @torch.no_grad()
     def sample_step(
         self,
         x: torch.Tensor,
@@ -342,7 +371,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         model_pred = self.diffusion_model(
             x=rearrange(x, "t b ... -> b t ..."),
             t=rearrange(clipped_curr_noise_level, "t b -> b t"),
-            external_cond=rearrange(external_cond, "t b ... -> b t ..."),
+            external_cond=rearrange(external_cond, "t b ... -> b t ...") if external_cond is not None else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
 
@@ -439,9 +468,30 @@ class DiffusionForcingVideo(pl.LightningModule):
 
         return loss.mean()
 
+    @torch.no_grad()
+    def vae_encode(self, x):
+        if not self.vae:
+            return x
+        batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
+        x = rearrange(x, "b t ... -> (b t) ...")
+        x = self.vae.encode(x).mean * self.scaling_factor
+        x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
+        return x
+    
+    @torch.no_grad()
+    def vae_decode(self, x):
+        # input: (b, t, c, h, w)
+        if not self.vae:
+            return x
+        batch_size, n_frames, c, h, w = x.shape
+        x = rearrange(x, "b t c h w -> (b t) (h w) c")
+        x = self.vae.decode(x / self.scaling_factor)
+        x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
+        return x
+
     def _preprocess_batch(self, batch):
         xs = batch[0]
-        batch_size, n_frames = xs.shape[:2]
+        batch_size, n_frames, c, h, w = xs.shape
 
         masks = torch.ones(n_frames, batch_size).to(self.device)
 
@@ -461,13 +511,12 @@ class DiffusionForcingVideo(pl.LightningModule):
         shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
         mean = self.data_mean.reshape(shape)
         std = self.data_std.reshape(shape)
-        return (xs - mean) / std
+        xs = (xs - mean) / std
+        return xs
 
     def _unnormalize_x(self, xs):
         shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
         mean = self.data_mean.reshape(shape)
         std = self.data_std.reshape(shape)
-        return xs * std + mean
-
-    def _unstack_and_unnormalize(self, xs):
-        return self._unnormalize_x(xs)
+        xs = xs * std + mean
+        return xs

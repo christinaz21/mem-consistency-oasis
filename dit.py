@@ -328,5 +328,21 @@ def DiT_S_2():
         num_heads=16,
     )
 
+def self_train():
+    return DiT(
+        input_h=64,
+        input_w=64,
+        in_channels=3,
+        patch_size=2,
+        hidden_size=256,
+        depth=16,
+        num_heads=16,
+        external_cond_dim=4,
+        max_frames=10
+    )
 
-DiT_models = {"DiT-S/2": DiT_S_2}
+
+DiT_models = {
+    "DiT-S/2": DiT_S_2,
+    "self_train": self_train,
+}

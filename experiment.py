@@ -1,4 +1,4 @@
-from dataset import MinecraftVideoDataset
+from dataset import MinecraftVideoDataset, MinerlDataset
 from trainer import DiffusionForcingVideo
 
 from typing import Optional, Union
@@ -31,6 +31,7 @@ class VideoPredictionExperiment:
     compatible_datasets = dict(
         # video datasets
         video_minecraft=MinecraftVideoDataset,
+        minerl=MinerlDataset,
     )
 
     def __init__(
@@ -162,7 +163,7 @@ class VideoPredictionExperiment:
         if torch.cuda.device_count() == 1:
             training_strategy = "auto"
         elif self.cfg.training.strategy == "ddp":
-            training_strategy = DDPStrategy(find_unused_parameters=False)
+            training_strategy = DDPStrategy(find_unused_parameters=True)
         elif self.cfg.training.strategy == "deepspeed":
             training_strategy = DeepSpeedStrategy(
                 stage=3,
@@ -194,7 +195,6 @@ class VideoPredictionExperiment:
 
         # if self.debug:
         #     self.logger.watch(self.algo, log="all")
-
         trainer.fit(
             self.algo,
             train_dataloaders=self._build_training_loader(),

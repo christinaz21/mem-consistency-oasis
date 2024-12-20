@@ -51,7 +51,7 @@ def run_local(cfg: DictConfig):
     from utils import OfflineWandbLogger, SpaceEfficientWandbLogger
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-    # os.environ["HYDRA_FULL_ERROR"] = "1"
+    os.environ["HYDRA_FULL_ERROR"] = "1"
     os.environ["NCCL_P2P_DISABLE"] = "1"
 
     # Get yaml names
@@ -129,7 +129,7 @@ def run_local(cfg: DictConfig):
 @hydra.main(
     version_base=None,
     config_path="config",
-    config_name="config",
+    config_name="latent_diffusion",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:
