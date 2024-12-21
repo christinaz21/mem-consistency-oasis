@@ -6,7 +6,7 @@ defaults:
   - model: dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
-debug: true # global debug flag will be passed into configuration of experiment, dataset and algorithm
+debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
 
 wandb:
   entity: tychen0028 # wandb account name / organization name [fixme]
@@ -22,7 +22,7 @@ experiment:
   tasks: [training]
   training:
     precision: 16-mixed
-    devices: [4]
+    devices: [4,5,6,7]
     strategy: ddp
     batch_size: 8
   validation:

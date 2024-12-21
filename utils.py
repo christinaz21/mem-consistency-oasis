@@ -137,6 +137,7 @@ class FrechetVideoDistance(nn.Module):
         super().__init__()
         assert path is not None, "FVD detector path must be provided"
         self.detector = torch.jit.load(path).eval()
+        self.detector_kwargs = dict(rescale=False, resize=True, return_features=True)
 
     def compute_fvd(self, feats_fake: np.ndarray, feats_real: np.ndarray) -> float:
         mu_gen, sigma_gen = self.compute_stats(feats_fake)
