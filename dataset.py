@@ -8,6 +8,7 @@ from torchvision import transforms
 from pathlib import Path
 import json
 from pytorchvideo.data.encoded_video import EncodedVideo
+from decord import VideoReader
 
 class MinecraftVideoDataset(torch.utils.data.Dataset):
     """
@@ -104,6 +105,8 @@ class MinecraftVideoDataset(torch.utils.data.Dataset):
             nonterminal[:: self.frame_skip],
         )
 
+Encode_Package = "decord"
+
 class MinerlDataset(torch.utils.data.Dataset):
     """
     Minecraft dataset
@@ -179,12 +182,19 @@ class MinerlDataset(torch.utils.data.Dataset):
         file_idx, frame_idx = self.split_idx(idx)
         action_path = self.data_paths[file_idx]
         video_path = action_path.with_suffix(".mp4")
-        video = EncodedVideo.from_path(video_path, decode_audio=False)
-        start_sec = frame_idx / 20
-        end_sec = (frame_idx + self.n_frames) / 20
-        end_sec = min(end_sec, video.duration)
-        video = video.get_clip(start_sec=start_sec, end_sec=end_sec)["video"]
-        video = video.permute(1, 2, 3, 0).numpy()
+        if Encode_Package == "pytorch_video":
+            video = EncodedVideo.from_path(video_path, decode_audio=False)
+            start_sec = frame_idx / 20
+            end_sec = (frame_idx + self.n_frames) / 20
+            end_sec = min(end_sec, video.duration)
+            video = video.get_clip(start_sec=start_sec, end_sec=end_sec)["video"]
+            video = video.permute(1, 2, 3, 0).numpy()
+        elif Encode_Package == "decord":
+            # less memory, similar speed
+            video = VideoReader(str(video_path), width=self.w, height=self.h)
+            video = video.get_batch(range(frame_idx, frame_idx + self.n_frames)).asnumpy()
+        else:
+            raise ValueError("Unknown Encode_Package")
         if self.external_cond_dim > 0:
             actions = np.load(action_path)["actions"]
             actions = actions[frame_idx : frame_idx + self.n_frames]  # (t, )

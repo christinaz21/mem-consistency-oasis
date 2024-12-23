@@ -106,6 +106,8 @@ class VideoPredictionExperiment:
                 shuffle=shuffle,
                 persistent_workers=True,
                 drop_last=True,
+                pin_memory=True,
+                # prefetch_factor=8, # pre-load 8 * 32 data points, equal to 32 batch
             )
         else:
             return None
@@ -124,6 +126,8 @@ class VideoPredictionExperiment:
                 num_workers=min(os.cpu_count(), self.cfg.validation.data.num_workers),
                 shuffle=shuffle,
                 persistent_workers=True,
+                drop_last=True,
+                pin_memory=True,
             )
         else:
             return None
