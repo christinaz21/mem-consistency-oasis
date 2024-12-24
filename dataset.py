@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 from pytorchvideo.data.encoded_video import EncodedVideo
 from decord import VideoReader
+from torchvision.io import read_video
 
 class MinecraftVideoDataset(torch.utils.data.Dataset):
     """
@@ -105,7 +106,7 @@ class MinecraftVideoDataset(torch.utils.data.Dataset):
             nonterminal[:: self.frame_skip],
         )
 
-Encode_Package = "decord"
+Encode_Package = "read_video"
 
 class MinerlDataset(torch.utils.data.Dataset):
     """
@@ -183,16 +184,24 @@ class MinerlDataset(torch.utils.data.Dataset):
         action_path = self.data_paths[file_idx]
         video_path = action_path.with_suffix(".mp4")
         if Encode_Package == "pytorch_video":
-            video = EncodedVideo.from_path(video_path, decode_audio=False)
+            encoded_video = EncodedVideo.from_path(video_path, decode_audio=False)
             start_sec = frame_idx / 20
             end_sec = (frame_idx + self.n_frames) / 20
-            end_sec = min(end_sec, video.duration)
-            video = video.get_clip(start_sec=start_sec, end_sec=end_sec)["video"]
+            end_sec = min(end_sec, encoded_video.duration)
+            video = encoded_video.get_clip(start_sec=start_sec, end_sec=end_sec)["video"]
             video = video.permute(1, 2, 3, 0).numpy()
+            encoded_video.close()
         elif Encode_Package == "decord":
             # less memory, similar speed
-            video = VideoReader(str(video_path), width=self.w, height=self.h)
+            with open(str(video_path), 'rb') as f:
+                # use in memory video reader, safer, out of memory reader will cause leak?
+                video = VideoReader(f, width=self.w, height=self.h)
             video = video.get_batch(range(frame_idx, frame_idx + self.n_frames)).asnumpy()
+        elif Encode_Package == "read_video":
+            start = frame_idx / 20
+            end = (frame_idx + self.n_frames) / 20
+            video, _, _ = read_video(str(video_path), start_pts=start, end_pts=end, pts_unit="sec")
+            video = video.contiguous().numpy()
         else:
             raise ValueError("Unknown Encode_Package")
         if self.external_cond_dim > 0:

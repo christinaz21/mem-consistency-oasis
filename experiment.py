@@ -127,7 +127,6 @@ class VideoPredictionExperiment:
                 shuffle=shuffle,
                 persistent_workers=True,
                 drop_last=True,
-                pin_memory=True,
             )
         else:
             return None
