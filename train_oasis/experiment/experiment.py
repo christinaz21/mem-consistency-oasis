@@ -1,5 +1,6 @@
-from dataset import MinecraftVideoDataset, MinerlDataset
-from trainer import DiffusionForcingVideo
+from train_oasis.dataset.minerl import MinerlDataset
+from train_oasis.dataset.minecraftvideo import MinecraftVideoDataset
+from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 
 from typing import Optional, Union
 import pathlib
@@ -17,7 +18,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from omegaconf import DictConfig
 
-from utils import cyan, is_rank_zero
+from train_oasis.utils import cyan, is_rank_zero
 
 class VideoPredictionExperiment:
     """

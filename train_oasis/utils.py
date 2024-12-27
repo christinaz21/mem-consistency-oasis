@@ -3,7 +3,6 @@ Adapted from https://github.com/buoyancy99/diffusion-forcing/blob/main/algorithm
 Action format derived from VPT https://github.com/openai/Video-Pre-Training
 """
 
-import math
 import torch
 from torch import nn
 from torchvision.io import read_image, read_video

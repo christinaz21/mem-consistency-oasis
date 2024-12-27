@@ -22,7 +22,7 @@ experiment:
   tasks: [training]
   training:
     precision: 16-mixed
-    devices: [4,5,6,7]
+    devices: [4, 5, 6, 7]
     strategy: ddp
     batch_size: 8
   validation:
@@ -35,3 +35,6 @@ experiment:
 algorithm:
   warmup_steps: 5000
   vae_ckpt: /data/taiye/Project/open-oasis/models/oasis500m/vit-l-20.safetensors
+
+dataset:
+  external_cond_dim: 18

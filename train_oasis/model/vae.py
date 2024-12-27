@@ -14,8 +14,8 @@ import torch.nn.functional as F
 from einops import rearrange
 from timm.models.vision_transformer import Mlp
 from timm.layers.helpers import to_2tuple
-from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
-from dit import PatchEmbed
+from train_oasis.model.rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
+from train_oasis.model.dit import PatchEmbed
 
 
 class DiagonalGaussianDistribution(object):

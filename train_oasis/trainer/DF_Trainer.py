@@ -19,7 +19,7 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 
-from dit import DiT
+from train_oasis.model.dit import DiT
 
 class WarmUpScheduler:
     def __init__(self, optimizer, cfg):
@@ -110,7 +110,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
         
         if self.cfg.vae_ckpt:
-            from vae import AutoencoderKL
+            from train_oasis.model.vae import AutoencoderKL
             from safetensors.torch import load_model
             self.vae = AutoencoderKL(
                 latent_dim=16,

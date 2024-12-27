@@ -7,19 +7,21 @@ and the `LICENSE` file to credit the author.
 Main file for the project. This will create and run new experiments and load checkpoints from wandb. 
 Borrowed part of the code from David Charatan and wandb.
 """
+import sys
+import os
+dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(dir_path)
 
 from pathlib import Path
-
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
-from utils import cyan, is_rank_zero, download_latest_checkpoint, is_run_id
-from experiment import VideoPredictionExperiment
+from train_oasis.utils import cyan, is_rank_zero, download_latest_checkpoint, is_run_id
+from train_oasis.experiment.experiment import VideoPredictionExperiment
 from typing import Optional, Union
 from lightning.pytorch.loggers.wandb import WandbLogger
-import os
 
 exp_registry = dict(
     exp=VideoPredictionExperiment,
@@ -128,8 +130,8 @@ def run_local(cfg: DictConfig):
 
 @hydra.main(
     version_base=None,
-    config_path="config",
-    config_name="latent_diffusion",
+    config_path="/data/taiye/Project/open-oasis/config",
+    config_name="latent_diffusion.yaml",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:
