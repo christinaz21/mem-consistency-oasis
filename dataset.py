@@ -10,6 +10,7 @@ import json
 from pytorchvideo.data.encoded_video import EncodedVideo
 from decord import VideoReader
 from torchvision.io import read_video
+from utils import parse_VPT_action
 
 class MinecraftVideoDataset(torch.utils.data.Dataset):
     """
@@ -199,15 +200,16 @@ class MinerlDataset(torch.utils.data.Dataset):
             video = video.get_batch(range(frame_idx, frame_idx + self.n_frames)).asnumpy()
         elif Encode_Package == "read_video":
             start = frame_idx / 20
-            end = (frame_idx + self.n_frames) / 20
+            end = (frame_idx + self.n_frames - 1) / 20
             video, _, _ = read_video(str(video_path), start_pts=start, end_pts=end, pts_unit="sec")
             video = video.contiguous().numpy()
         else:
             raise ValueError("Unknown Encode_Package")
         if self.external_cond_dim > 0:
-            actions = np.load(action_path)["actions"]
-            actions = actions[frame_idx : frame_idx + self.n_frames]  # (t, )
-            actions = np.eye(4)[actions]  # (t, 4)
+            with open(action_path, "r") as f:
+                lines = f.readlines()
+            actions = [parse_VPT_action(line) for line in lines[frame_idx : frame_idx + self.n_frames]]
+            actions = np.array(actions)
 
         # video = video[frame_idx : frame_idx + self.n_frames]  # (t, h, w, 3)
         pad_len = self.n_frames - len(video)
@@ -216,8 +218,9 @@ class MinerlDataset(torch.utils.data.Dataset):
         if len(video) < self.n_frames:
             video = np.pad(video, ((0, pad_len), (0, 0), (0, 0), (0, 0)))
             nonterminal[-pad_len:] = 0
-            if self.external_cond_dim > 0:
-                actions = np.pad(actions, ((0, pad_len),))
+        if self.external_cond_dim > 0 and len(actions) < self.n_frames:
+            pad_len = self.n_frames - len(actions)
+            actions = np.pad(actions, ((0, pad_len),))
 
         video = torch.from_numpy(video / 255.0).float().permute(0, 3, 1, 2).contiguous()
 

@@ -502,7 +502,80 @@ def extract(a, t, x_shape):
     out = a[t]
     return out.reshape(f, b, *((1,) * (len(x_shape) - 2)))
 
+keyboard_index = {
+    'key.keyboard.f3': 1,
+    'key.keyboard.q': 2,
+    'key.keyboard.v': 3,
+    'key.keyboard.b': 4,
+    'key.keyboard.r': 5,
+    'key.keyboard.z': 6,
+    'key.keyboard.e': 7,
+    'key.keyboard.f': 8,
+    'key.keyboard.right.alt': 9,
+    'key.keyboard.h': 10,
+    'key.keyboard.o': 11,
+    'key.keyboard.c': 12,
+    'key.keyboard.left.alt': 13,
+    'key.keyboard.left.shift': 14,
+    'key.keyboard.right.shift': 15,
+    'key.keyboard.left.win': 16,
+    'key.keyboard.1': 17,
+    'key.keyboard.2': 18,
+    'key.keyboard.3': 19,
+    'key.keyboard.4': 20,
+    'key.keyboard.5': 21,
+    'key.keyboard.6': 22,
+    'key.keyboard.7': 23,
+    'key.keyboard.8': 24,
+    'key.keyboard.9': 25,
+    'key.keyboard.0': 26,
+    'key.keyboard.grave.accent': 27,
+    'scancode.0': 28,
+    'key.keyboard.backspace': 29,
+    'key.keyboard.caps.lock': 30,
+}
+
 def parse_VPT_action(line:str):
     data = json.loads(line)
-    actions = []
-    
+    mouse_x = data['mouse']['x']
+    mouse_y = data['mouse']['y']
+    mouse_dx = data['mouse']['dx']
+    mouse_dy = data['mouse']['dy']
+    mouse_scaledX = data['mouse']['scaledX']
+    mouse_scaledY = data['mouse']['scaledY']
+    mouse_dwheel = data['mouse']['dwheel']
+    mouse_button_0 = 1 if 0 in data['mouse']['buttons'] else 0
+    mouse_button_1 = 1 if 1 in data['mouse']['buttons'] else 0
+    keyboard_w = 1 if "key.keyboard.w" in data['keyboard']['keys'] else 0
+    keyboard_a = 1 if "key.keyboard.a" in data['keyboard']['keys'] else 0
+    keyboard_s = 1 if "key.keyboard.s" in data['keyboard']['keys'] else 0
+    keyboard_d = 1 if "key.keyboard.d" in data['keyboard']['keys'] else 0
+    keyboard_space = 1 if "key.keyboard.space" in data['keyboard']['keys'] else 0
+    keyboard_esc = 1 if "key.keyboard.escape" in data['keyboard']['keys'] else 0
+    keyboard_left_control = 1 if "key.keyboard.left.control" in data['keyboard']['keys'] else 0
+    one_hot = np.zeros(18)
+    one_hot[0] = mouse_x
+    one_hot[1] = mouse_y
+    one_hot[2] = mouse_dx
+    one_hot[3] = mouse_dy
+    one_hot[4] = mouse_scaledX
+    one_hot[5] = mouse_scaledY
+    one_hot[6] = mouse_dwheel
+    one_hot[7] = mouse_button_0
+    one_hot[8] = mouse_button_1
+    one_hot[9] = keyboard_w
+    one_hot[10] = keyboard_a
+    one_hot[11] = keyboard_s
+    one_hot[12] = keyboard_d
+    one_hot[13] = keyboard_space
+    one_hot[14] = keyboard_esc
+    one_hot[15] = keyboard_left_control
+    for key in data['keyboard']['keys']:
+        if one_hot[16] != 0 and one_hot[17] != 0:
+            break
+        if key in keyboard_index:
+            if one_hot[16] == 0:
+                one_hot[16] = keyboard_index[key]
+            else:
+                one_hot[17] = keyboard_index[key]
+    return one_hot

@@ -214,7 +214,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         model_pred = self.diffusion_model(
             x=rearrange(noised_x, "t b ... -> b t ..."),
             t=rearrange(noise_levels, "t b -> b t"),
-            external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions else None,
+            external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
 
@@ -497,7 +497,7 @@ class DiffusionForcingVideo(pl.LightningModule):
 
         masks = torch.ones(n_frames, batch_size).to(self.device)
 
-        if self.external_cond_dim:
+        if self.external_cond_dim > 0:
             conditions = batch[1]
             conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
             conditions = rearrange(conditions, "b t d -> t b d").contiguous()
