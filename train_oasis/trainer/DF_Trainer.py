@@ -254,7 +254,6 @@ class DiffusionForcingVideo(pl.LightningModule):
         xs_gt = xs.clone()
         xs = self.vae_encode(xs)
         n_frames, batch_size, *_ = xs.shape
-        xs_pred = []
         curr_frame = 0
 
         # context
@@ -271,7 +270,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             assert horizon <= self.n_frames, "horizon exceeds the number of tokens."
             scheduling_matrix = self._generate_scheduling_matrix(horizon)
 
-            chunk = torch.randn((horizon, batch_size, *self.x_shape), device=self.device)
+            chunk = torch.randn((horizon, batch_size, *self.x_shape), device=self.device, dtype=xs_pred.dtype)
             chunk = torch.clamp(chunk, -self.clip_noise, self.clip_noise)
             xs_pred = torch.cat([xs_pred, chunk], 0)
 
