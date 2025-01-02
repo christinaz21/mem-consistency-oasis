@@ -11,6 +11,7 @@ import sys
 import os
 dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(dir_path)
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
 
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def build_experiment(
 def run_local(cfg: DictConfig):
     # delay some imports in case they are not needed in non-local envs for submission
     from utils import OfflineWandbLogger, SpaceEfficientWandbLogger
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+    
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     # os.environ["HYDRA_FULL_ERROR"] = "1"
     os.environ["NCCL_P2P_DISABLE"] = "1"

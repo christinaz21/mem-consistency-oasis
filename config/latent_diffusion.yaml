@@ -22,20 +22,24 @@ experiment:
   tasks: [training]
   training:
     precision: bf16-mixed
-    devices: [4, 5, 6, 7]
-    strategy: ddp
-    batch_size: 4
+    devices: auto
+    strategy: deepspeed
+    batch_size: 16
   validation:
     precision: bf16-mixed
-    batch_size: 4
+    strategy: deepspeed
+    batch_size: 8
     limit_batch: 1
-    val_every_n_step: 4000
+    val_every_n_step: 3000
   checkpointing:
-    every_n_train_steps: 4000
+    every_n_train_steps: 3000
   
 algorithm:
-  warmup_steps: 8000
+  warmup_steps: 6000
   vae_ckpt: /data/taiye/Project/open-oasis/models/oasis500m/vit-l-20.safetensors
 
 dataset:
   external_cond_dim: 25
+
+model:
+  precision: bf16-mixed

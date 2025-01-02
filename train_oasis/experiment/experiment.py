@@ -218,12 +218,25 @@ class VideoPredictionExperiment:
 
         callbacks = []
 
+        if torch.cuda.device_count() == 1:
+            validation_strategy = "auto"
+        elif self.cfg.validation.strategy == "ddp":
+            validation_strategy = DDPStrategy(find_unused_parameters=True)
+        elif self.cfg.validation.strategy == "deepspeed":
+            validation_strategy = DeepSpeedStrategy(
+                stage=3,
+                offload_optimizer=True,
+                offload_parameters=True,
+            )
+        else:
+            raise ValueError(f"Unknown strategy {self.cfg.training.strategy}")
+
         trainer = pl.Trainer(
             accelerator="auto",
             logger=self.logger,
             devices="auto",
             num_nodes=self.cfg.num_nodes,
-            strategy=DDPStrategy(find_unused_parameters=False) if torch.cuda.device_count() > 1 else "auto",
+            strategy=validation_strategy,
             callbacks=callbacks,
             limit_val_batches=self.cfg.validation.limit_batch,
             precision=self.cfg.validation.precision,
