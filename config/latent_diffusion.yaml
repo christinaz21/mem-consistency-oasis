@@ -21,20 +21,21 @@ name: latent_diffusion
 experiment:
   tasks: [training]
   training:
-    precision: 16-mixed
+    precision: bf16-mixed
     devices: [4, 5, 6, 7]
     strategy: ddp
-    batch_size: 8
+    batch_size: 4
   validation:
-    batch_size: 8
+    precision: bf16-mixed
+    batch_size: 4
     limit_batch: 1
-    val_every_n_step: 2000
+    val_every_n_step: 4000
   checkpointing:
-    every_n_train_steps: 2000
+    every_n_train_steps: 4000
   
 algorithm:
-  warmup_steps: 5000
+  warmup_steps: 8000
   vae_ckpt: /data/taiye/Project/open-oasis/models/oasis500m/vit-l-20.safetensors
 
 dataset:
-  external_cond_dim: 18
+  external_cond_dim: 25

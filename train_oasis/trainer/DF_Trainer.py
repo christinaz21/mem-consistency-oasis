@@ -217,6 +217,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
+        assert torch.isnan(model_pred).sum() == 0, "model prediction contains NaN."
 
         loss = F.mse_loss(model_pred, xs.detach(), reduction="none")
         loss_weight = self.compute_loss_weights(noise_levels)

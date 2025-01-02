@@ -501,80 +501,115 @@ def extract(a, t, x_shape):
     out = a[t]
     return out.reshape(f, b, *((1,) * (len(x_shape) - 2)))
 
-keyboard_index = {
-    'key.keyboard.f3': 1,
-    'key.keyboard.q': 2,
-    'key.keyboard.v': 3,
-    'key.keyboard.b': 4,
-    'key.keyboard.r': 5,
-    'key.keyboard.z': 6,
-    'key.keyboard.e': 7,
-    'key.keyboard.f': 8,
-    'key.keyboard.right.alt': 9,
-    'key.keyboard.h': 10,
-    'key.keyboard.o': 11,
-    'key.keyboard.c': 12,
-    'key.keyboard.left.alt': 13,
-    'key.keyboard.left.shift': 14,
-    'key.keyboard.right.shift': 15,
-    'key.keyboard.left.win': 16,
-    'key.keyboard.1': 17,
-    'key.keyboard.2': 18,
-    'key.keyboard.3': 19,
-    'key.keyboard.4': 20,
-    'key.keyboard.5': 21,
-    'key.keyboard.6': 22,
-    'key.keyboard.7': 23,
-    'key.keyboard.8': 24,
-    'key.keyboard.9': 25,
-    'key.keyboard.0': 26,
-    'key.keyboard.grave.accent': 27,
-    'scancode.0': 28,
-    'key.keyboard.backspace': 29,
-    'key.keyboard.caps.lock': 30,
+KEYBOARD_BUTTON_MAPPING = {
+    "key.keyboard.escape" :"ESC",
+    "key.keyboard.s" :"back",
+    "key.keyboard.q" :"drop",
+    "key.keyboard.w" :"forward",
+    "key.keyboard.1" :"hotbar.1",
+    "key.keyboard.2" :"hotbar.2",
+    "key.keyboard.3" :"hotbar.3",
+    "key.keyboard.4" :"hotbar.4",
+    "key.keyboard.5" :"hotbar.5",
+    "key.keyboard.6" :"hotbar.6",
+    "key.keyboard.7" :"hotbar.7",
+    "key.keyboard.8" :"hotbar.8",
+    "key.keyboard.9" :"hotbar.9",
+    "key.keyboard.e" :"inventory",
+    "key.keyboard.space" :"jump",
+    "key.keyboard.a" :"left",
+    "key.keyboard.d" :"right",
+    "key.keyboard.left.shift" :"sneak",
+    "key.keyboard.right.shift" :"sneak",
+    "key.keyboard.left.control" :"sprint",
+    "key.keyboard.right.control" :"sprint",
+    "key.keyboard.f" :"swapHands",
 }
 
+# Template action
+NOOP_ACTION = {
+    "ESC": 0,
+    "back": 0,
+    "drop": 0,
+    "forward": 0,
+    "hotbar.1": 0,
+    "hotbar.2": 0,
+    "hotbar.3": 0,
+    "hotbar.4": 0,
+    "hotbar.5": 0,
+    "hotbar.6": 0,
+    "hotbar.7": 0,
+    "hotbar.8": 0,
+    "hotbar.9": 0,
+    "inventory": 0,
+    "jump": 0,
+    "left": 0,
+    "right": 0,
+    "sneak": 0,
+    "sprint": 0,
+    "swapHands": 0,
+    "camera": np.array([0, 0]),
+    "attack": 0,
+    "use": 0,
+    "pickItem": 0,
+}
+
+CAMERA_SCALER = 360.0 / 2400.0
+
 def parse_VPT_action(line:str):
-    data = json.loads(line)
-    mouse_x = data['mouse']['x']
-    mouse_y = data['mouse']['y']
-    mouse_dx = data['mouse']['dx']
-    mouse_dy = data['mouse']['dy']
-    mouse_scaledX = data['mouse']['scaledX']
-    mouse_scaledY = data['mouse']['scaledY']
-    mouse_dwheel = data['mouse']['dwheel']
-    mouse_button_0 = 1 if 0 in data['mouse']['buttons'] else 0
-    mouse_button_1 = 1 if 1 in data['mouse']['buttons'] else 0
-    keyboard_w = 1 if "key.keyboard.w" in data['keyboard']['keys'] else 0
-    keyboard_a = 1 if "key.keyboard.a" in data['keyboard']['keys'] else 0
-    keyboard_s = 1 if "key.keyboard.s" in data['keyboard']['keys'] else 0
-    keyboard_d = 1 if "key.keyboard.d" in data['keyboard']['keys'] else 0
-    keyboard_space = 1 if "key.keyboard.space" in data['keyboard']['keys'] else 0
-    keyboard_esc = 1 if "key.keyboard.escape" in data['keyboard']['keys'] else 0
-    keyboard_left_control = 1 if "key.keyboard.left.control" in data['keyboard']['keys'] else 0
-    one_hot = np.zeros(18)
-    one_hot[0] = mouse_x
-    one_hot[1] = mouse_y
-    one_hot[2] = mouse_dx
-    one_hot[3] = mouse_dy
-    one_hot[4] = mouse_scaledX
-    one_hot[5] = mouse_scaledY
-    one_hot[6] = mouse_dwheel
-    one_hot[7] = mouse_button_0
-    one_hot[8] = mouse_button_1
-    one_hot[9] = keyboard_w
-    one_hot[10] = keyboard_a
-    one_hot[11] = keyboard_s
-    one_hot[12] = keyboard_d
-    one_hot[13] = keyboard_space
-    one_hot[14] = keyboard_esc
-    one_hot[15] = keyboard_left_control
-    for key in data['keyboard']['keys']:
-        if one_hot[16] != 0 and one_hot[17] != 0:
-            break
-        if key in keyboard_index:
-            if one_hot[16] == 0:
-                one_hot[16] = keyboard_index[key]
-            else:
-                one_hot[17] = keyboard_index[key]
+    json_action = json.loads(line)
+    env_action = NOOP_ACTION.copy()
+    # As a safeguard, make camera action again so we do not override anything
+    env_action["camera"] = np.array([0, 0])
+
+    keyboard_keys = json_action["keyboard"]["keys"]
+    for key in keyboard_keys:
+        # You can have keys that we do not use, so just skip them
+        # NOTE in original training code, ESC was removed and replaced with
+        #      "inventory" action if GUI was open.
+        #      Not doing it here, as BASALT uses ESC to quit the game.
+        if key in KEYBOARD_BUTTON_MAPPING:
+            env_action[KEYBOARD_BUTTON_MAPPING[key]] = 1
+
+    mouse = json_action["mouse"]
+    camera_action = env_action["camera"]
+    camera_action[0] = mouse["dy"] * CAMERA_SCALER
+    camera_action[1] = mouse["dx"] * CAMERA_SCALER
+
+    mouse_buttons = mouse["buttons"]
+    if 0 in mouse_buttons:
+        env_action["attack"] = 1
+    if 1 in mouse_buttons:
+        env_action["use"] = 1
+    if 2 in mouse_buttons:
+        env_action["pickItem"] = 1
+
+    # convert to onehot
+    one_hot = np.zeros(len(NOOP_ACTION)+1)
+    one_hot[0] = env_action["ESC"]
+    one_hot[1] = env_action["back"]
+    one_hot[2] = env_action["drop"]
+    one_hot[3] = env_action["forward"]
+    one_hot[4] = env_action["hotbar.1"]
+    one_hot[5] = env_action["hotbar.2"]
+    one_hot[6] = env_action["hotbar.3"]
+    one_hot[7] = env_action["hotbar.4"]
+    one_hot[8] = env_action["hotbar.5"]
+    one_hot[9] = env_action["hotbar.6"]
+    one_hot[10] = env_action["hotbar.7"]
+    one_hot[11] = env_action["hotbar.8"]
+    one_hot[12] = env_action["hotbar.9"]
+    one_hot[13] = env_action["inventory"]
+    one_hot[14] = env_action["jump"]
+    one_hot[15] = env_action["left"]
+    one_hot[16] = env_action["right"]
+    one_hot[17] = env_action["sneak"]
+    one_hot[18] = env_action["sprint"]
+    one_hot[19] = env_action["swapHands"]
+    one_hot[20] = env_action["camera"][0]
+    one_hot[21] = env_action["camera"][1]
+    one_hot[22] = env_action["attack"]
+    one_hot[23] = env_action["use"]
+    one_hot[24] = env_action["pickItem"]
+
     return one_hot
