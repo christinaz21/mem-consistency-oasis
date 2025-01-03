@@ -35,6 +35,7 @@ diffusion:
   stabilization_level: 15
 
 metrics:
-  - fvd
+  - nothing
+  # - fvd
   # - fid
   # - lpips
