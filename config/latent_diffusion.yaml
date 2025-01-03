@@ -27,8 +27,8 @@ experiment:
     batch_size: 16
   validation:
     precision: bf16-mixed
-    strategy: deepspeed
-    batch_size: 8
+    strategy: ddp
+    batch_size: 4
     limit_batch: 1
     val_every_n_step: 3000
   checkpointing:
