@@ -1,45 +1,32 @@
-# Oasis 500M
+# Train oasis
 
-![](./media/arch.png)
+## Data setup
 
-![](./media/thumb.png)
+Project Url: [GitHub - openai/Video-Pre-Training: Video PreTraining (VPT): Learning to Act by Watching Unlabeled Online Videos](https://github.com/openai/Video-Pre-Training)
 
-Oasis is an interactive world model developed by [Decart](https://www.decart.ai/) and [Etched](https://www.etched.com/). Based on diffusion transformers, Oasis takes in user keyboard input and generates gameplay in an autoregressive manner. We release the weights for Oasis 500M, a downscaled version of the model, along with inference code for action-conditional frame generation. 
+Version: 7.x
 
-For more details, see our [joint blog post](https://oasis-model.github.io/) to learn more.
+Index file url: https://openaipublic.blob.core.windows.net/minecraft-rl/snapshots/all_7xx_Apr_6.json
 
-And to use the most powerful version of the model, be sure to check out the [live demo](https://oasis.us.decart.ai/) as well!
+Downloading program (file path on the server):
+/data/taiye/Project/open-oasis/data/VPT/download.py
 
-## Setup
-```
-git clone https://github.com/etched-ai/open-oasis.git
-cd open-oasis
-# Install pytorch
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# Install other dependencies
-pip install einops diffusers timm av
-```
+Download data:
 
-## Download the model weights
-Inside the `open-oasis/` directory, run:
-```
-huggingface-cli login
-huggingface-cli download Etched/oasis-500m oasis500m.safetensors # DiT checkpoint
-huggingface-cli download Etched/oasis-500m vit-l-20.safetensors  # ViT VAE checkpoint
-```
+1. Download the index file
+2. Set the dir_path (where to save the video and action files), the file_path (the path of index file) and start_index & end_index (download range i.e. how many data points you want to download)
+3. Run the python program
 
-## Basic Usage
-We include a basic inference script that loads a prompt frame from a video and generates additional frames conditioned on actions.
-```
-python generate.py
-# Or specify path to checkpoints:
-python generate.py --oasis-ckpt <path to oasis500m.safetensors> --vae-ckpt <path to vit-l-20.safetensors>
-```
-Use a custom image prompt:
-```
-python generate.py --prompt-path <path to .png, .jpg, or .jpeg>
-```
-The resulting video will be saved to `video.mp4`. Here's are some examples of a generation from this 500M model!
+## Training
 
-![](media/sample_0.gif)
-![](media/sample_1.gif)
+1. Set `CUDA_VISIBLE_DEVICES` in main.py (if you use **ddp** as training strategy, you can just set `experiment.training.device`. But you have to set `CUDA_VISIBLE_DEVICES` if you use **deepspeed**.)
+2. Set `config_path` and `config_name` in main.py
+3. Download vae ckpt
+4. Set config in `config/dataset/minerl.yaml`: save_dir
+5. Set some config in `config/latent_diffusion.yaml`: 
+
+    - wandb
+    - algorithm.vae_ckpt
+    - experiment.training.batch_size
+
+6. python train_oasis/main.py
