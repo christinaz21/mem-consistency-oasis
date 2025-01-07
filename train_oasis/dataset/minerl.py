@@ -69,7 +69,7 @@ class MinerlDataset(torch.utils.data.Dataset):
         for path in paths:
             with open(path, "r") as f:
                 lines = f.readlines()
-                lengths.append(len(lines))
+                lengths.append(len(lines)+1)
         return lengths
 
     def split_idx(self, idx):
@@ -89,8 +89,13 @@ class MinerlDataset(torch.utils.data.Dataset):
         if self.external_cond_dim > 0:
             with open(action_path, "r") as f:
                 lines = f.readlines()
-            actions = [parse_VPT_action(line) for line in lines[frame_idx : frame_idx + self.n_frames]]
-            actions = np.array(actions)
+            if frame_idx == 0:
+                # First frame will be set to zero
+                actions = [parse_VPT_action(lines[0])] + [parse_VPT_action(line) for line in lines[frame_idx : frame_idx + self.n_frames - 1]]
+                actions = np.array(actions)
+            else:
+                actions = [parse_VPT_action(line) for line in lines[frame_idx - 1 : frame_idx + self.n_frames - 1]]
+                actions = np.array(actions)
 
         # video = video[frame_idx : frame_idx + self.n_frames]  # (t, h, w, 3)
         pad_len = self.n_frames - len(video)

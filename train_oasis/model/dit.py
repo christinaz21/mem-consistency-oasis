@@ -334,7 +334,7 @@ def DiT_S_2():
         num_heads=16,
     )
 
-def self_train():
+def dit_small():
     return DiT(
         input_h=64,
         input_w=64,
@@ -347,8 +347,21 @@ def self_train():
         max_frames=10
     )
 
+def dit_cty():
+    return DiT(
+        input_h=18,
+        input_w=32,
+        in_channels=16,
+        patch_size=2,
+        hidden_size=1024,
+        depth=16,
+        num_heads=16,
+        external_cond_dim=25,
+        max_frames=10
+    )
 
 DiT_models = {
     "DiT-S/2": DiT_S_2,
-    "self_train": self_train,
+    "dit_small": dit_small,
+    "dit_cty": dit_cty
 }

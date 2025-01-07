@@ -19,8 +19,6 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 
-from train_oasis.model.dit import DiT
-
 class WarmUpScheduler:
     def __init__(self, optimizer, cfg):
         self.optimizer = optimizer
@@ -93,7 +91,23 @@ class DiffusionForcingVideo(pl.LightningModule):
 
 
     def _build_model(self):
-        if "dit" in self.model_cfg._name:
+        if self.model_cfg._name == "dit" or self.model_cfg._name == "dit_small":
+            from train_oasis.model.dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        elif self.model_cfg._name == "open_sora_dit":
+            from train_oasis.model.open_sora_dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,
                 input_w=self.model_cfg.input_w,

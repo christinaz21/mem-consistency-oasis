@@ -2,8 +2,6 @@
 Based on https://github.com/buoyancy99/diffusion-forcing/blob/main/algorithms/diffusion_forcing/models/attention.py
 """
 
-from typing import Optional
-from collections import namedtuple
 import torch
 from torch import nn
 from torch.nn import functional as F
