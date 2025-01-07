@@ -6,7 +6,7 @@ References:
 import torch
 from train_oasis.model.dit import DiT_models
 from torchvision.io import read_video, write_video, write_png
-from utils import sigmoid_beta_schedule, read_image, resize, extract
+from train_oasis.utils import sigmoid_beta_schedule, read_image, resize, extract
 from tqdm import tqdm
 from einops import rearrange
 from torch import autocast

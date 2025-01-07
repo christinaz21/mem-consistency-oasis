@@ -7,7 +7,7 @@ import torch
 from train_oasis.model.dit import DiT_models
 from train_oasis.model.vae import VAE_models
 from torchvision.io import read_video, write_video
-from utils import load_prompt, load_actions, sigmoid_beta_schedule
+from train_oasis.utils import load_prompt, load_actions, sigmoid_beta_schedule
 from tqdm import tqdm
 from einops import rearrange
 from torch import autocast
