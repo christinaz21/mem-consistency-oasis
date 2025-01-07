@@ -95,6 +95,7 @@ def load_prompt(path, video_offset=None, n_prompt_frames=1):
         if video_offset is not None:
             prompt = prompt[video_offset:]
         prompt = prompt[:n_prompt_frames]
+        prompt = rearrange(prompt, "t h w c -> t c h w")
     else:
         raise ValueError(f"unrecognized prompt file extension; expected one in {IMAGE_EXTENSIONS} or {VIDEO_EXTENSIONS}")
     assert prompt.shape[0] == n_prompt_frames, f"input prompt {path} had less than n_prompt_frames={n_prompt_frames} frames"
@@ -110,8 +111,14 @@ def load_actions(path, action_offset=None):
         actions = one_hot_actions(torch.load(path))
     elif path.endswith(".one_hot_actions.pt"):
         actions = torch.load(path, weights_only=True)
+    elif path.endswith(".jsonl"):
+        with open(path, "r") as f:
+            lines = f.readlines()
+        actions = [parse_VPT_action(line) for line in lines]
+        actions = np.array(actions)
+        actions = torch.from_numpy(actions).float()
     else:
-        raise ValueError("unrecognized action file extension; expected '*.actions.pt' or '*.one_hot_actions.pt'")
+        raise ValueError("unrecognized action file extension; expected '.jsonl', '*.actions.pt' or '*.one_hot_actions.pt'")
     if action_offset is not None:
         actions = actions[action_offset:]
     actions = torch.cat([torch.zeros_like(actions[:1]), actions], dim=0)

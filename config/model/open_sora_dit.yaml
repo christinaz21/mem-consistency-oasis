@@ -1,0 +1,8 @@
+input_h: 18
+input_w: 32
+patch_size: 2
+in_channels: 16
+hidden_size: 1152
+depth: 28
+num_heads: 16
+mlp_ratio: 4.0

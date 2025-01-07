@@ -1,5 +1,4 @@
 debug: ${debug} # inherited from configurations/config.yaml
-metadata: "data/minecraft_video/minecraft/metadata.json"
 
 save_dir: data/VPT
 n_frames: 10 # TODO: increase later

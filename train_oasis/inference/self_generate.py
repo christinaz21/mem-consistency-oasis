@@ -9,18 +9,21 @@ sys.path.append(dir_path)
 
 import torch
 from train_oasis.model.dit import DiT_models
-from train_oasis.model.vae import VAE_models
-from torchvision.io import read_video, write_video
-from train_oasis.utils import load_prompt, load_actions, sigmoid_beta_schedule
+from torchvision.io import write_video
+from train_oasis.utils import sigmoid_beta_schedule
 from tqdm import tqdm
 from einops import rearrange
 from torch import autocast
 from safetensors.torch import load_model
 import argparse
 from pprint import pprint
+from pytorchvideo.data.encoded_video import EncodedVideo
+from torchvision import transforms
 
 assert torch.cuda.is_available()
-device = "cuda:0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+device = torch.device("cuda")
+print(f"using device: {device}")
 
 
 def main(args):
@@ -28,33 +31,18 @@ def main(args):
     torch.cuda.manual_seed(0)
 
     # load DiT checkpoint
-    model = DiT_models[args.model_name]()
+    model = DiT_models["dit_small"]()
     print(f"loading Oasis-500M from oasis-ckpt={os.path.abspath(args.oasis_ckpt)}...")
-    if args.oasis_ckpt.endswith(".pt"):
-        ckpt = torch.load(args.oasis_ckpt, weights_only=True)
-        model.load_state_dict(ckpt, strict=False)
-    elif args.oasis_ckpt.endswith(".safetensors"):
-        load_model(model, args.oasis_ckpt)
-    elif args.oasis_ckpt.endswith(".bin"):
-        ckpt = torch.load(args.oasis_ckpt)
+    if args.oasis_ckpt.endswith(".pt") or args.oasis_ckpt.endswith(".ckpt"):
+        ckpt = torch.load(args.oasis_ckpt, map_location="cpu")['state_dict']
         state_dict = {}
         for key, value in ckpt.items():
             if key.startswith("diffusion_model."):
                 state_dict[key[16:]] = value
-        model.load_state_dict(state_dict, strict=True)
-    else:
-        raise ValueError(f"unsupported checkpoint format: {args.oasis_ckpt}")
+        model.load_state_dict(state_dict)
+    elif args.oasis_ckpt.endswith(".safetensors"):
+        load_model(model, args.oasis_ckpt)
     model = model.to(device).eval()
-
-    # load VAE checkpoint
-    vae = VAE_models["vit-l-20-shallow-encoder"]()
-    print(f"loading ViT-VAE-L/20 from vae-ckpt={os.path.abspath(args.vae_ckpt)}...")
-    if args.vae_ckpt.endswith(".pt"):
-        vae_ckpt = torch.load(args.vae_ckpt, weights_only=True)
-        vae.load_state_dict(vae_ckpt)
-    elif args.vae_ckpt.endswith(".safetensors"):
-        load_model(vae, args.vae_ckpt)
-    vae = vae.to(device).eval()
 
     # sampling params
     n_prompt_frames = args.n_prompt_frames
@@ -62,32 +50,33 @@ def main(args):
     max_noise_level = 1000
     ddim_noise_steps = args.ddim_steps
     noise_range = torch.linspace(-1, max_noise_level - 1, ddim_noise_steps + 1)
-    noise_abs_max = 6 # open oasis use 20
+    noise_abs_max = 6
     stabilization_level = 15
 
     # get prompt image/video
-    x = load_prompt(
-        args.prompt_path,
-        video_offset=args.video_offset,
-        n_prompt_frames=n_prompt_frames,
-    )
-    print(x.shape)
+    # x = load_prompt(
+    #     args.prompt_path,
+    #     video_offset=args.video_offset,
+    #     n_prompt_frames=n_prompt_frames,
+    # )
+    video = EncodedVideo.from_path(args.prompt_path, decode_audio=False)
+    video = video.get_clip(start_sec=0.0, end_sec=video.duration)["video"]
+    video = video.permute(1, 2, 3, 0).numpy()[args.video_offset:args.video_offset+20]
+    video = torch.from_numpy(video / 255.0).float().permute(0, 3, 1, 2).contiguous()
+    transform = transforms.Resize((64, 64), antialias=True)
+    video = transform(video)[::2]
     # get input action stream
-    actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames]
-    print(actions.shape)
+    actions = torch.zeros((1, args.num_frames, 4), device=device)
+    actions[:, 0] = 1.0
+
     # sampling inputs
-    x = x.to(device)
-    actions = actions.to(device)
+    x = video.to(device)
+    x = x.reshape(1, -1, 3, 64, 64)
+    x = (x - 0.5) / 0.5
 
     # vae encoding
     B = x.shape[0]
     H, W = x.shape[-2:]
-    scaling_factor = 0.07843137255
-    x = rearrange(x, "b t c h w -> (b t) c h w")
-    with torch.no_grad():
-        with autocast("cuda", dtype=torch.half):
-            x = vae.encode(x * 2 - 1).mean * scaling_factor
-    x = rearrange(x, "(b t) (h w) c -> b t c h w", t=n_prompt_frames, h=H // vae.patch_size, w=W // vae.patch_size)
     x = x[:, :n_prompt_frames]
 
     # get alphas
@@ -101,6 +90,7 @@ def main(args):
         chunk = torch.randn((B, 1, *x.shape[-3:]), device=device) # (B, 1, C, H, W)
         chunk = torch.clamp(chunk, -noise_abs_max, +noise_abs_max)
         x = torch.cat([x, chunk], dim=1)
+        # print(x[0][-1])
         start_frame = max(0, i + 1 - model.max_frames)
 
         for noise_idx in reversed(range(1, ddim_noise_steps + 1)):
@@ -121,12 +111,8 @@ def main(args):
             # get model predictions
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.half):
-                    v = model(x_curr, t, actions[:, start_frame : i + 1])
-            
-            if args.predict_v:
-                x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
-            else:
-                x_start = v
+                    x_start = model(x_curr, t, actions[:, start_frame : i + 1])
+
             x_noise = ((1 / alphas_cumprod[t]).sqrt() * x_curr - x_start) / (1 / alphas_cumprod[t] - 1).sqrt()
 
             # get frame prediction
@@ -137,18 +123,14 @@ def main(args):
             x_pred = alpha_next.sqrt() * x_start + x_noise * (1 - alpha_next).sqrt()
             x[:, -1:] = x_pred[:, -1:]
 
-    # vae decoding
-    x = rearrange(x, "b t c h w -> (b t) (h w) c")
-    with torch.no_grad():
-        x = (vae.decode(x / scaling_factor) + 1) / 2
-    x = rearrange(x, "(b t) c h w -> b t h w c", t=total_frames)
-
     # save video
+    x = x * 0.5 + 0.5
     x = torch.clamp(x, 0, 1)
     x = (x * 255).byte()
-    write_video(args.output_path, x[0].cpu(), fps=args.fps)
+    x = x[0].cpu()
+    x = x.permute(0, 2, 3, 1).numpy()
+    write_video(args.output_path, x, fps=args.fps)
     print(f"generation saved to {args.output_path}.")
-
 
 if __name__ == "__main__":
     parse = argparse.ArgumentParser()
@@ -157,25 +139,7 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-01-03/04-51-38/checkpoints/pytorch_model.bin",
-    )
-    parse.add_argument(
-        "--model-name",
-        type=str,
-        help="Model name",
-        default="dit_cty",
-    )
-    parse.add_argument(
-        "--predict_v",
-        action="store_true",
-        help="Whether the model use predict_v.",
-        default=False,
-    )
-    parse.add_argument(
-        "--vae-ckpt",
-        type=str,
-        help="Path to Oasis ViT-VAE checkpoint.",
-        default="models/oasis500m/vit-l-20.safetensors",
+        default="outputs/2024-12-17/11-28-33/checkpoints/epoch=1-step=230000.ckpt",
     )
     parse.add_argument(
         "--num-frames",
@@ -187,19 +151,13 @@ if __name__ == "__main__":
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.mp4",
-    )
-    parse.add_argument(
-        "--actions-path",
-        type=str,
-        help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.jsonl",
+        default="data/minecraft_video/minecraft/validation/000720.mp4",
     )
     parse.add_argument(
         "--video-offset",
         type=int,
         help="If loading prompt from video, index of frame to start reading from.",
-        default=None,
+        default=10,
     )
     parse.add_argument(
         "--n-prompt-frames",
@@ -211,7 +169,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/cty-120.mp4",
+        default="outputs/video/self-120.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -219,7 +177,7 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=20,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=50)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=40)
 
     args = parse.parse_args()
     print("inference args:")

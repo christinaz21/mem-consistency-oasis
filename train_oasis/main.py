@@ -132,7 +132,7 @@ def run_local(cfg: DictConfig):
 @hydra.main(
     version_base=None,
     config_path="/data/taiye/Project/open-oasis/config",
-    config_name="latent_diffusion.yaml",
+    config_name="open_sora.yaml",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:
