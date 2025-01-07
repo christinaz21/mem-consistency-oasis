@@ -2,19 +2,22 @@
 References:
     - Diffusion Forcing: https://github.com/buoyancy99/diffusion-forcing
 """
+import sys
+import os
+dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+sys.path.append(dir_path)
 
 import torch
 from train_oasis.model.dit import DiT_models
 from train_oasis.model.vae import VAE_models
 from torchvision.io import read_video, write_video
-from utils import load_prompt, load_actions, sigmoid_beta_schedule
+from train_oasis.utils import load_prompt, load_actions, sigmoid_beta_schedule
 from tqdm import tqdm
 from einops import rearrange
 from torch import autocast
 from safetensors.torch import load_model
 import argparse
 from pprint import pprint
-import os
 
 assert torch.cuda.is_available()
 device = "cuda:0"
@@ -25,13 +28,22 @@ def main(args):
     torch.cuda.manual_seed(0)
 
     # load DiT checkpoint
-    model = DiT_models["DiT-S/2"]()
+    model = DiT_models[args.model_name]()
     print(f"loading Oasis-500M from oasis-ckpt={os.path.abspath(args.oasis_ckpt)}...")
     if args.oasis_ckpt.endswith(".pt"):
         ckpt = torch.load(args.oasis_ckpt, weights_only=True)
         model.load_state_dict(ckpt, strict=False)
     elif args.oasis_ckpt.endswith(".safetensors"):
         load_model(model, args.oasis_ckpt)
+    elif args.oasis_ckpt.endswith(".bin"):
+        ckpt = torch.load(args.oasis_ckpt)
+        state_dict = {}
+        for key, value in ckpt.items():
+            if key.startswith("diffusion_model."):
+                state_dict[key[16:]] = value
+        model.load_state_dict(state_dict, strict=True)
+    else:
+        raise ValueError(f"unsupported checkpoint format: {args.oasis_ckpt}")
     model = model.to(device).eval()
 
     # load VAE checkpoint
@@ -50,7 +62,7 @@ def main(args):
     max_noise_level = 1000
     ddim_noise_steps = args.ddim_steps
     noise_range = torch.linspace(-1, max_noise_level - 1, ddim_noise_steps + 1)
-    noise_abs_max = 20
+    noise_abs_max = 6 # open oasis use 20
     stabilization_level = 15
 
     # get prompt image/video
@@ -59,9 +71,10 @@ def main(args):
         video_offset=args.video_offset,
         n_prompt_frames=n_prompt_frames,
     )
+    print(x.shape)
     # get input action stream
     actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames]
-
+    print(actions.shape)
     # sampling inputs
     x = x.to(device)
     actions = actions.to(device)
@@ -109,8 +122,11 @@ def main(args):
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.half):
                     v = model(x_curr, t, actions[:, start_frame : i + 1])
-
-            x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
+            
+            if args.predict_v:
+                x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
+            else:
+                x_start = v
             x_noise = ((1 / alphas_cumprod[t]).sqrt() * x_curr - x_start) / (1 / alphas_cumprod[t] - 1).sqrt()
 
             # get frame prediction
@@ -141,31 +157,43 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="oasis500m.safetensors",
+        default="outputs/2025-01-03/04-51-38/checkpoints/pytorch_model.bin",
+    )
+    parse.add_argument(
+        "--model-name",
+        type=str,
+        help="Model name",
+        default="dit_cty",
+    )
+    parse.add_argument(
+        "--predict_v",
+        action="store_true",
+        help="Whether the model use predict_v.",
+        default=False,
     )
     parse.add_argument(
         "--vae-ckpt",
         type=str,
         help="Path to Oasis ViT-VAE checkpoint.",
-        default="vit-l-20.safetensors",
+        default="models/oasis500m/vit-l-20.safetensors",
     )
     parse.add_argument(
         "--num-frames",
         type=int,
         help="How many frames should the output be?",
-        default=32,
+        default=120,
     )
     parse.add_argument(
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="sample_data/sample_image_0.png",
+        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="sample_data/sample_actions_0.one_hot_actions.pt",
+        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.jsonl",
     )
     parse.add_argument(
         "--video-offset",
@@ -183,7 +211,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="video.mp4",
+        default="outputs/video/cty-120.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -191,7 +219,7 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=20,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=10)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=50)
 
     args = parse.parse_args()
     print("inference args:")

@@ -9,8 +9,8 @@ sys.path.append(dir_path)
 
 import torch
 from train_oasis.model.dit import DiT_models
-from torchvision.io import read_video, write_video, write_png
-from train_oasis.utils import sigmoid_beta_schedule, read_image, resize, extract
+from torchvision.io import write_video
+from train_oasis.utils import sigmoid_beta_schedule
 from tqdm import tqdm
 from einops import rearrange
 from torch import autocast
@@ -19,7 +19,6 @@ import argparse
 from pprint import pprint
 from pytorchvideo.data.encoded_video import EncodedVideo
 from torchvision import transforms
-from pathlib import Path
 
 assert torch.cuda.is_available()
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -32,7 +31,7 @@ def main(args):
     torch.cuda.manual_seed(0)
 
     # load DiT checkpoint
-    model = DiT_models["self_train"]()
+    model = DiT_models["dit_small"]()
     print(f"loading Oasis-500M from oasis-ckpt={os.path.abspath(args.oasis_ckpt)}...")
     if args.oasis_ckpt.endswith(".pt") or args.oasis_ckpt.endswith(".ckpt"):
         ckpt = torch.load(args.oasis_ckpt, map_location="cpu")['state_dict']
