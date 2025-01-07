@@ -141,6 +141,7 @@ class SpatioTemporalDiTBlock(nn.Module):
         is_causal=True,
         spatial_rotary_emb: Optional[RotaryEmbedding] = None,
         temporal_rotary_emb: Optional[RotaryEmbedding] = None,
+        enable_flash_attn: bool = True,
     ):
         super().__init__()
         self.is_causal = is_causal
@@ -153,6 +154,7 @@ class SpatioTemporalDiTBlock(nn.Module):
             heads=num_heads,
             dim_head=hidden_size // num_heads,
             rotary_emb=spatial_rotary_emb,
+            enable_flash_attn=enable_flash_attn,
         )
         self.s_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.s_mlp = Mlp(
@@ -170,6 +172,7 @@ class SpatioTemporalDiTBlock(nn.Module):
             dim_head=hidden_size // num_heads,
             is_causal=is_causal,
             rotary_emb=temporal_rotary_emb,
+            enable_flash_attn=enable_flash_attn,
         )
         self.t_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.t_mlp = Mlp(

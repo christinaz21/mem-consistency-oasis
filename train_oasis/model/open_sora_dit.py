@@ -9,16 +9,13 @@
 # MAE:   https://github.com/facebookresearch/mae/blob/main/models_mae.py
 # --------------------------------------------------------
 
-from collections.abc import Iterable
-
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 from einops import rearrange
 from timm.models.vision_transformer import Mlp
 
-from .open_sora_block import (
+from .attention import (
     Attention,
     get_layernorm,
     approx_gelu,
@@ -30,15 +27,6 @@ from .dit import (
     FinalLayer,
     TimestepEmbedder,
 )
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-
-def auto_grad_checkpoint(module, *args, **kwargs):
-    if getattr(module, "grad_checkpointing", False):
-        if not isinstance(module, Iterable):
-            return checkpoint(module, *args, use_reentrant=False, **kwargs)
-        gc_step = module[0].grad_checkpointing_step
-        return checkpoint_sequential(module, gc_step, *args, use_reentrant=False, **kwargs)
-    return module(*args, **kwargs)
 
 class DiTBlock(nn.Module):
     """
@@ -94,7 +82,7 @@ class DiT(nn.Module):
         external_cond_dim=25,
         max_frames=32,
         dtype=torch.float32,
-        enable_flash_attn=False,
+        enable_flash_attn=True,
         enable_layernorm_kernel=False,
     ):
         super().__init__()
