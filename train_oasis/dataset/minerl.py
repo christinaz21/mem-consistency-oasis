@@ -6,6 +6,9 @@ from pathlib import Path
 import json
 from torchvision.io import read_video
 from train_oasis.utils import parse_VPT_action
+import os
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 class MinerlDataset(torch.utils.data.Dataset):
     """
@@ -40,11 +43,14 @@ class MinerlDataset(torch.utils.data.Dataset):
                     "validation": self.get_data_lengths("validation"),
                 },
                 open(self.metadata_path, "w"),
+                indent=4,
             )
 
         self.metadata = json.load(open(self.metadata_path, "r"))
-        self.data_paths = self.get_data_paths(self.split)
-        self.clips_per_video = np.clip(np.array(self.metadata[split]) - self.n_frames + 1, a_min=1, a_max=None).astype(
+        # self.data_paths = self.get_data_paths(self.split)
+        self.data_paths = [Path(x["file"]) for x in self.metadata[self.split]]
+        lengths = [x["length"] for x in self.metadata[self.split]]
+        self.clips_per_video = np.clip(np.array(lengths) - self.n_frames + 1, a_min=1, a_max=None).astype(
             np.int32
         )
         self.cum_clips_per_video = np.cumsum(self.clips_per_video)
@@ -65,11 +71,27 @@ class MinerlDataset(torch.utils.data.Dataset):
 
     def get_data_lengths(self, split):
         paths = self.get_data_paths(split)
-        lengths = []
-        for path in paths:
-            with open(path, "r") as f:
-                lines = f.readlines()
-                lengths.append(len(lines)+1)
+        total_files = len(paths)
+
+        def process_file(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    line_count = sum(1 for _ in f)  # Count lines incrementally
+                return str(path), line_count + 1  # Add 1 to mimic original logic
+            except Exception as e:
+                print(f"Skipping file {path} due to error: {e}")
+                return None
+
+        # Use ThreadPoolExecutor for concurrent processing
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            # Wrap the executor.map with tqdm for progress bar
+            results = list(tqdm(executor.map(process_file, paths), total=total_files, desc="Processing files"))
+
+        # Collect valid lengths
+        lengths = [ {
+            "file": result[0],
+            "length": result[1]
+        } for result in results if result is not None]
         return lengths
 
     def split_idx(self, idx):
@@ -81,6 +103,7 @@ class MinerlDataset(torch.utils.data.Dataset):
         idx = self.idx_remap[idx]
         file_idx, frame_idx = self.split_idx(idx)
         action_path = self.data_paths[file_idx]
+        assert action_path.exists(), f"File {action_path} does not exist"
         video_path = action_path.with_suffix(".mp4")
         start = frame_idx / 20
         end = (frame_idx + self.n_frames - 1) / 20
