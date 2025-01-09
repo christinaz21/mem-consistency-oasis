@@ -18,6 +18,8 @@ from torch import autocast
 from safetensors.torch import load_model
 import argparse
 from pprint import pprint
+import os
+from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
 device = "cuda:0"
@@ -37,6 +39,13 @@ def main(args):
         load_model(model, args.oasis_ckpt)
     elif args.oasis_ckpt.endswith(".bin"):
         ckpt = torch.load(args.oasis_ckpt)
+        state_dict = {}
+        for key, value in ckpt.items():
+            if key.startswith("diffusion_model."):
+                state_dict[key[16:]] = value
+        model.load_state_dict(state_dict, strict=True)
+    elif os.path.isdir(args.oasis_ckpt):
+        ckpt = get_fp32_state_dict_from_zero_checkpoint(args.oasis_ckpt)
         state_dict = {}
         for key, value in ckpt.items():
             if key.startswith("diffusion_model."):
@@ -157,7 +166,7 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-01-03/04-51-38/checkpoints/pytorch_model.bin",
+        default="outputs/2025-01-03/04-51-38/checkpoints/epoch=4-step=90000.ckpt",
     )
     parse.add_argument(
         "--model-name",

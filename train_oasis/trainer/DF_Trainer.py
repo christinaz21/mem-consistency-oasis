@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from utils import FrechetVideoDistance, get_validation_metrics_for_videos, log_video, extract, sigmoid_beta_schedule
+from utils import FrechetVideoDistance, get_validation_metrics_for_videos, log_video, extract, sigmoid_beta_schedule, convert_zero_ckpt_into_state_dict
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
@@ -38,7 +38,7 @@ class WarmUpScheduler:
 
 
 class DiffusionForcingVideo(pl.LightningModule):
-    def __init__(self, cfg: DictConfig, model_cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
         self.cfg = cfg
         self.model_cfg = model_cfg
@@ -63,7 +63,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
         
-        self._build_model()
+        self._build_model(model_ckpt)
         self._build_buffer()
 
     def register_data_mean_std(
@@ -90,7 +90,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             self.register_buffer(f"{namespace}_{k}", v.float().to(self.device))
 
 
-    def _build_model(self):
+    def _build_model(self, model_ckpt):
         if self.model_cfg._name == "dit" or self.model_cfg._name == "dit_small":
             from train_oasis.model.dit import DiT
             self.diffusion_model = DiT(
@@ -123,6 +123,11 @@ class DiffusionForcingVideo(pl.LightningModule):
             )
         else:
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
+        
+        if model_ckpt:
+            print(f"Loading Diffusion model from {model_ckpt}")
+            state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
+            self.diffusion_model.load_state_dict(state_dict, strict=True)
         
         if self.cfg.vae_ckpt:
             from train_oasis.model.vae import AutoencoderKL

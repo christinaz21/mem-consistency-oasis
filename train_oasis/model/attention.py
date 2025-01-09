@@ -207,7 +207,7 @@ class Attention(nn.Module):
             self.rope = True
             self.rotary_emb = rope
         
-        self.is_causal = True
+        self.is_causal = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, H, W, C = x.shape
@@ -216,9 +216,9 @@ class Attention(nn.Module):
         # flash attn is not memory efficient for small sequences, this is empirical
         enable_flash_attn = self.enable_flash_attn and (N > B)
         qkv = self.qkv(x)
-        qkv_shape = (B, N, 3, self.num_heads, self.head_dim)
-
-        qkv = qkv.view(qkv_shape).permute(2, 0, 3, 1, 4)
+        # qkv_shape = (B, N, 3, self.num_heads, self.head_dim)
+        # qkv = qkv.view(qkv_shape).permute(2, 0, 3, 1, 4)
+        qkv = rearrange(qkv, "b n (u h d) -> u b h n d", u=3, b=B, n=N, h=self.num_heads, d=self.head_dim)
         q, k, v = qkv.unbind(0)
         if self.qk_norm_legacy:
             # WARNING: this may be a bug
@@ -236,9 +236,9 @@ class Attention(nn.Module):
             from flash_attn import flash_attn_func
 
             # (B, #heads, N, #dim) -> (B, N, #heads, #dim)
-            q = q.permute(0, 2, 1, 3)
-            k = k.permute(0, 2, 1, 3)
-            v = v.permute(0, 2, 1, 3)
+            q = rearrange(q, "B H N D -> B N H D", B=B, N=N, H=self.num_heads)
+            k = rearrange(k, "B H N D -> B N H D", B=B, N=N, H=self.num_heads)
+            v = rearrange(v, "B H N D -> B N H D", B=B, N=N, H=self.num_heads)
             x = flash_attn_func(
                 q,
                 k,
@@ -264,7 +264,8 @@ class Attention(nn.Module):
         x_output_shape = (B, N, C)
         if not enable_flash_attn:
             x = x.transpose(1, 2)
-        x = x.reshape(x_output_shape)
+        # x = x.reshape(x_output_shape)
+        x = rearrange(x, "b n h d -> b n (h d)", b=B, n=N, h=self.num_heads, d=self.head_dim)
         x = self.proj(x)
         x = self.proj_drop(x)
         x = rearrange(x, "b (t h w) c -> b t h w c", t=T, h=H, w=W)

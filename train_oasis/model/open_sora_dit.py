@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from einops import rearrange
 from timm.models.vision_transformer import Mlp
+import numpy as np
 
 from .attention import (
     Attention,
@@ -27,6 +28,66 @@ from .dit import (
     FinalLayer,
     TimestepEmbedder,
 )
+
+def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0, scale=1.0, base_size=None):
+    """
+    grid_size: int of the grid height and width
+    return:
+    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    """
+    if not isinstance(grid_size, tuple):
+        grid_size = (grid_size, grid_size)
+
+    grid_h = np.arange(grid_size[0], dtype=np.float32) / scale
+    grid_w = np.arange(grid_size[1], dtype=np.float32) / scale
+    if base_size is not None:
+        grid_h *= base_size / grid_size[0]
+        grid_w *= base_size / grid_size[1]
+    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
+    grid = np.stack(grid, axis=0)
+
+    grid = grid.reshape([2, 1, grid_size[1], grid_size[0]])
+    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
+    if cls_token and extra_tokens > 0:
+        pos_embed = np.concatenate([np.zeros([extra_tokens, embed_dim]), pos_embed], axis=0)
+    return pos_embed
+
+
+def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
+    assert embed_dim % 2 == 0
+
+    # use half of dimensions to encode grid_h
+    emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
+    emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
+
+    emb = np.concatenate([emb_h, emb_w], axis=1)  # (H*W, D)
+    return emb
+
+
+def get_1d_sincos_pos_embed(embed_dim, length, scale=1.0):
+    pos = np.arange(0, length)[..., None] / scale
+    return get_1d_sincos_pos_embed_from_grid(embed_dim, pos)
+
+
+def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
+    """
+    embed_dim: output dimension for each position
+    pos: a list of positions to be encoded: size (M,)
+    out: (M, D)
+    """
+    assert embed_dim % 2 == 0
+    omega = np.arange(embed_dim // 2, dtype=np.float64)
+    omega /= embed_dim / 2.0
+    omega = 1.0 / 10000**omega  # (D/2,)
+
+    pos = pos.reshape(-1)  # (M,)
+    out = np.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
+
+    emb_sin = np.sin(out)  # (M, D/2)
+    emb_cos = np.cos(out)  # (M, D/2)
+
+    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
+    return emb
 
 class DiTBlock(nn.Module):
     """
@@ -81,6 +142,7 @@ class DiT(nn.Module):
         mlp_ratio=4.0,
         external_cond_dim=25,
         max_frames=32,
+        max_temporal_pos_emb=40,
         dtype=torch.float32,
         enable_flash_attn=True,
         enable_layernorm_kernel=False,
@@ -92,6 +154,8 @@ class DiT(nn.Module):
         self.num_heads = num_heads
         self.max_frames = max_frames
         self.dtype = dtype
+        self.hidden_size = hidden_size
+        self.input_size = (max_frames, input_h, input_w)
         if enable_flash_attn:
             assert dtype in [
                 torch.float16,
@@ -101,6 +165,9 @@ class DiT(nn.Module):
         self.x_embedder = PatchEmbed(input_h, input_w, patch_size, in_channels, hidden_size, flatten=False)
         self.t_embedder = TimestepEmbedder(hidden_size, dtype=dtype)
         frame_h, frame_w = self.x_embedder.grid_size
+
+        self.register_buffer("pos_embed_spatial", self.get_spatial_pos_embed())
+        self.register_buffer("pos_embed_temporal", self.get_temporal_pos_embed(max_temporal_pos_emb))
 
         self.external_cond = nn.Linear(external_cond_dim, hidden_size) if external_cond_dim > 0 else nn.Identity()
 
@@ -164,6 +231,22 @@ class DiT(nn.Module):
         x = torch.einsum("nhwpqc->nchpwq", x)
         imgs = x.reshape(shape=(x.shape[0], c, h * p, w * p))
         return imgs
+    
+    def get_spatial_pos_embed(self):
+        pos_embed = get_2d_sincos_pos_embed(
+            self.hidden_size,
+            (self.input_size[1] // self.patch_size, self.input_size[2] // self.patch_size),
+        )
+        pos_embed = torch.from_numpy(pos_embed).float().unsqueeze(0).requires_grad_(False)
+        return pos_embed
+
+    def get_temporal_pos_embed(self, max_temporal_pos_emb=40):
+        pos_embed = get_1d_sincos_pos_embed(
+            self.hidden_size,
+            max_temporal_pos_emb,
+        )
+        pos_embed = torch.from_numpy(pos_embed).float().unsqueeze(0).requires_grad_(False)
+        return pos_embed
 
     def forward(self, x, t, external_cond=None):
         """
@@ -178,7 +261,13 @@ class DiT(nn.Module):
         x = rearrange(x, "b t c h w -> (b t) c h w")
         x = self.x_embedder(x)  # (B*T, C, H, W) -> (B*T, H/2, W/2, D) , C = 16, D = d_model
         # restore shape
-        x = rearrange(x, "(b t) h w d -> b t h w d", t=T)
+        x = rearrange(x, "(b t) h w d -> b t (h w) d", t=T)
+        # embed x
+        x = x + self.pos_embed_spatial
+        x = rearrange(x, "b t s d -> b s t d")
+        x = x + self.pos_embed_temporal[:, :T, :]
+        x = rearrange(x, "b s t d -> b t s d")
+        x = rearrange(x, "b t (h w) d -> b t h w d", b=B, t=T, h=H // self.patch_size, w=W // self.patch_size)
         # embed noise steps
         t = rearrange(t, "b t -> (b t)")
         c = self.t_embedder(t)  # (N, D)
@@ -186,7 +275,7 @@ class DiT(nn.Module):
         if torch.is_tensor(external_cond):
             c += self.external_cond(external_cond)
         for block in self.blocks:
-            x = block(x, c)  # (N, T, H, W, D)
+            x = block(x, c)
         x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
         # unpatchify
         x = rearrange(x, "b t h w d -> (b t) h w d")

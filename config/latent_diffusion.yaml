@@ -19,6 +19,7 @@ load: null # wandb run id containing checkpoint or a path to a checkpoint file
 name: latent_diffusion
 
 experiment:
+  model_ckpt: outputs/2025-01-03/04-51-38/checkpoints/epoch=4-step=90000.ckpt # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed

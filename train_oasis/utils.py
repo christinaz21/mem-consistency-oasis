@@ -620,3 +620,13 @@ def parse_VPT_action(line:str):
     one_hot[24] = env_action["pickItem"]
 
     return one_hot
+
+from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+
+def convert_zero_ckpt_into_state_dict(zero_ckpt_path):
+    ckpt = get_fp32_state_dict_from_zero_checkpoint(zero_ckpt_path)
+    state_dict = {}
+    for key, value in ckpt.items():
+        if key.startswith("diffusion_model."):
+            state_dict[key[16:]] = value
+    return state_dict

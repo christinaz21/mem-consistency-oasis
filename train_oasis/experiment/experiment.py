@@ -56,7 +56,7 @@ class VideoPredictionExperiment:
         self.ckpt_path = ckpt_path
         self.algo = None
 
-    def _build_algo(self):
+    def _build_algo(self, model_ckpt: Optional[str] = None):
         """
         Build the lightning module
         :return:  a pytorch-lightning module to be launched
@@ -68,7 +68,7 @@ class VideoPredictionExperiment:
                 "Make sure you define compatible_algorithms correctly and make sure that each key has "
                 "same name as yaml file under '[project_root]/configurations/algorithm' without .yaml suffix"
             )
-        return self.compatible_algorithms[algo_name](self.root_cfg.algorithm, self.root_cfg.model)
+        return self.compatible_algorithms[algo_name](self.root_cfg.algorithm, self.root_cfg.model, model_ckpt)
 
     def exec_task(self, task: str) -> None:
         """
@@ -151,7 +151,7 @@ class VideoPredictionExperiment:
         All training happens here
         """
         if not self.algo:
-            self.algo = self._build_algo()
+            self.algo = self._build_algo(self.cfg.model_ckpt)
         if self.cfg.training.compile:
             self.algo = torch.compile(self.algo)
 
