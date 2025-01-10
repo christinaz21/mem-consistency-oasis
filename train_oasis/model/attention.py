@@ -248,6 +248,7 @@ class Attention(nn.Module):
                 causal=self.is_causal,
             )
         else:
+            '''
             dtype = q.dtype
             q = q * self.scale
             attn = q @ k.transpose(-2, -1)  # translate attn to float32
@@ -260,6 +261,17 @@ class Attention(nn.Module):
             attn = attn.to(dtype)  # cast back attn to original dtype
             attn = self.attn_drop(attn)
             x = attn @ v
+            '''
+            if self.training:
+                # query (B, ..., heads, N, dim)
+                # attn_mask: bool (B,..., N, N)
+                causal_mask = torch.tril(torch.ones(T, T))
+                causal_mask = causal_mask.repeat_interleave(H * W, dim=0)  # Expand rows
+                causal_mask = causal_mask.repeat_interleave(H * W, dim=1)  # Expand columns
+                causal_mask = causal_mask.type_as(q).to(q.device)
+                x = F.scaled_dot_product_attention(query=q, key=k, value=v, attn_mask=causal_mask, is_causal=False) # (B, H, N, D)
+            else:
+                x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
 
         x_output_shape = (B, N, C)
         if not enable_flash_attn:

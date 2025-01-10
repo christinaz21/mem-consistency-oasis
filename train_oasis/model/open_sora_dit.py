@@ -144,7 +144,7 @@ class DiT(nn.Module):
         max_frames=32,
         max_temporal_pos_emb=40,
         dtype=torch.float32,
-        enable_flash_attn=True,
+        enable_flash_attn=False,
         enable_layernorm_kernel=False,
     ):
         super().__init__()
