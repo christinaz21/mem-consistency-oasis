@@ -268,7 +268,7 @@ class Attention(nn.Module):
                 causal_mask = torch.tril(torch.ones(T, T))
                 causal_mask = causal_mask.repeat_interleave(H * W, dim=0)  # Expand rows
                 causal_mask = causal_mask.repeat_interleave(H * W, dim=1)  # Expand columns
-                causal_mask = causal_mask.type_as(q).to(q.device)
+                causal_mask = causal_mask.bool().to(q.device)
                 x = F.scaled_dot_product_attention(query=q, key=k, value=v, attn_mask=causal_mask, is_causal=False) # (B, H, N, D)
             else:
                 x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
