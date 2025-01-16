@@ -182,9 +182,9 @@ class Attention(nn.Module):
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
         norm_layer: nn.Module = LlamaRMSNorm,
-        enable_flash_attn: bool = False,
         rope=None,
         qk_norm_legacy: bool = False,
+        use_causal_mask: bool = False,
     ) -> None:
         super().__init__()
         assert dim % num_heads == 0, "dim should be divisible by num_heads"
@@ -192,7 +192,6 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
-        self.enable_flash_attn = enable_flash_attn
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
@@ -207,14 +206,13 @@ class Attention(nn.Module):
             self.rope = True
             self.rotary_emb = rope
         
-        self.is_causal = False
+        self.use_causal_mask = use_causal_mask
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, H, W, C = x.shape
         x = rearrange(x, "b t h w c -> b (t h w) c")
         N = x.shape[1]
         # flash attn is not memory efficient for small sequences, this is empirical
-        enable_flash_attn = self.enable_flash_attn and (N > B)
         qkv = self.qkv(x)
         # qkv_shape = (B, N, 3, self.num_heads, self.head_dim)
         # qkv = qkv.view(qkv_shape).permute(2, 0, 3, 1, 4)
@@ -232,50 +230,18 @@ class Attention(nn.Module):
                 q = self.rotary_emb(q)
                 k = self.rotary_emb(k)
 
-        if enable_flash_attn:
-            from flash_attn import flash_attn_func
-
-            # (B, #heads, N, #dim) -> (B, N, #heads, #dim)
-            q = rearrange(q, "B H N D -> B N H D", B=B, N=N, H=self.num_heads)
-            k = rearrange(k, "B H N D -> B N H D", B=B, N=N, H=self.num_heads)
-            v = rearrange(v, "B H N D -> B N H D", B=B, N=N, H=self.num_heads)
-            x = flash_attn_func(
-                q,
-                k,
-                v,
-                dropout_p=self.attn_drop.p if self.training else 0.0,
-                softmax_scale=self.scale,
-                causal=self.is_causal,
-            )
+        if self.use_causal_mask and self.training:
+            # query (B, ..., heads, N, dim)
+            # attn_mask: bool (B,..., N, N)
+            causal_mask = torch.tril(torch.ones(T, T))
+            causal_mask = causal_mask.repeat_interleave(H * W, dim=0)  # Expand rows
+            causal_mask = causal_mask.repeat_interleave(H * W, dim=1)  # Expand columns
+            causal_mask = causal_mask.bool().to(q.device)
+            x = F.scaled_dot_product_attention(query=q, key=k, value=v, attn_mask=causal_mask, is_causal=False) # (B, H, N, D)
         else:
-            '''
-            dtype = q.dtype
-            q = q * self.scale
-            attn = q @ k.transpose(-2, -1)  # translate attn to float32
-            attn = attn.to(torch.float32)
-            if self.is_causal:
-                causal_mask = torch.tril(torch.ones_like(attn), diagonal=0)
-                causal_mask = torch.where(causal_mask.bool(), 0, float('-inf'))
-                attn += causal_mask
-            attn = attn.softmax(dim=-1)
-            attn = attn.to(dtype)  # cast back attn to original dtype
-            attn = self.attn_drop(attn)
-            x = attn @ v
-            '''
-            if self.training:
-                # query (B, ..., heads, N, dim)
-                # attn_mask: bool (B,..., N, N)
-                causal_mask = torch.tril(torch.ones(T, T))
-                causal_mask = causal_mask.repeat_interleave(H * W, dim=0)  # Expand rows
-                causal_mask = causal_mask.repeat_interleave(H * W, dim=1)  # Expand columns
-                causal_mask = causal_mask.bool().to(q.device)
-                x = F.scaled_dot_product_attention(query=q, key=k, value=v, attn_mask=causal_mask, is_causal=False) # (B, H, N, D)
-            else:
-                x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
+            x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
 
         x_output_shape = (B, N, C)
-        if not enable_flash_attn:
-            x = x.transpose(1, 2)
         # x = x.reshape(x_output_shape)
         x = rearrange(x, "b n h d -> b n (h d)", b=B, n=N, h=self.num_heads, d=self.head_dim)
         x = self.proj(x)

@@ -99,13 +99,12 @@ class DiTBlock(nn.Module):
         hidden_size,
         num_heads,
         mlp_ratio=4.0,
-        enable_flash_attn=False,
         enable_layernorm_kernel=False,
+        use_causal_mask=False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
-        self.enable_flash_attn = enable_flash_attn
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
 
         self.norm1 = get_layernorm(hidden_size, eps=1e-6, affine=False, use_kernel=enable_layernorm_kernel)
@@ -113,7 +112,7 @@ class DiTBlock(nn.Module):
             hidden_size,
             num_heads=num_heads,
             qkv_bias=True,
-            enable_flash_attn=enable_flash_attn,
+            use_causal_mask=use_causal_mask,
         )
         self.norm2 = get_layernorm(hidden_size, eps=1e-6, affine=False, use_kernel=enable_layernorm_kernel)
         self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
@@ -144,8 +143,8 @@ class DiT(nn.Module):
         max_frames=32,
         max_temporal_pos_emb=40,
         dtype=torch.float32,
-        enable_flash_attn=False,
         enable_layernorm_kernel=False,
+        use_causal_mask=False,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -156,11 +155,6 @@ class DiT(nn.Module):
         self.dtype = dtype
         self.hidden_size = hidden_size
         self.input_size = (max_frames, input_h, input_w)
-        if enable_flash_attn:
-            assert dtype in [
-                torch.float16,
-                torch.bfloat16,
-            ], f"Flash attention only supports float16 and bfloat16, but got {self.dtype}"
 
         self.x_embedder = PatchEmbed(input_h, input_w, patch_size, in_channels, hidden_size, flatten=False)
         self.t_embedder = TimestepEmbedder(hidden_size, dtype=dtype)
@@ -177,8 +171,8 @@ class DiT(nn.Module):
                     hidden_size,
                     num_heads,
                     mlp_ratio=mlp_ratio,
-                    enable_flash_attn=enable_flash_attn,
                     enable_layernorm_kernel=enable_layernorm_kernel,
+                    use_causal_mask=use_causal_mask,
                 )
                 for _ in range(depth)
             ]

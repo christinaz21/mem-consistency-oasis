@@ -83,14 +83,17 @@ def main(args):
     print(x.shape)
     # get input action stream
     actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames]
+    assert actions.shape[1] == total_frames, f"{actions.shape[1]} != {total_frames}"
     print(actions.shape)
     # sampling inputs
+    B = x.shape[0]
+    H, W = x.shape[-2:]
+    # x = torch.randn((B, 1, *x.shape[-3:]), device=device) # (B, 1, C, H, W)
+    # x = torch.clamp(x, -noise_abs_max, +noise_abs_max)
     x = x.to(device)
     actions = actions.to(device)
 
     # vae encoding
-    B = x.shape[0]
-    H, W = x.shape[-2:]
     scaling_factor = 0.07843137255
     x = rearrange(x, "b t c h w -> (b t) c h w")
     with torch.no_grad():
@@ -104,6 +107,9 @@ def main(args):
     alphas = 1.0 - betas
     alphas_cumprod = torch.cumprod(alphas, dim=0)
     alphas_cumprod = rearrange(alphas_cumprod, "T -> T 1 1 1")
+
+    # TODO: try bigger window size
+    model.max_frames = args.window_size
 
     # sampling loop
     for i in tqdm(range(n_prompt_frames, total_frames)):
@@ -181,6 +187,12 @@ if __name__ == "__main__":
         default=False,
     )
     parse.add_argument(
+        "--window_size",
+        type=int,
+        help="Model window size.",
+        default=10,
+    )
+    parse.add_argument(
         "--vae-ckpt",
         type=str,
         help="Path to Oasis ViT-VAE checkpoint.",
@@ -190,7 +202,7 @@ if __name__ == "__main__":
         "--num-frames",
         type=int,
         help="How many frames should the output be?",
-        default=120,
+        default=1200,
     )
     parse.add_argument(
         "--prompt-path",
@@ -220,7 +232,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/cty-120.mp4",
+        default="outputs/video/long.mp4",
     )
     parse.add_argument(
         "--fps",

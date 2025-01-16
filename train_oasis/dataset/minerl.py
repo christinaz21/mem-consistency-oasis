@@ -100,6 +100,12 @@ class MinerlDataset(torch.utils.data.Dataset):
         return video_idx, frame_idx
 
     def __getitem__(self, idx):
+        try:
+            return self.getitem(idx)
+        except Exception as e:
+            return self.getitem(random.randint(0, self.__len__() - 1))
+
+    def getitem(self, idx):
         idx = self.idx_remap[idx]
         file_idx, frame_idx = self.split_idx(idx)
         action_path = self.data_paths[file_idx]
@@ -124,13 +130,13 @@ class MinerlDataset(torch.utils.data.Dataset):
         pad_len = self.n_frames - len(video)
 
         nonterminal = np.ones(self.n_frames)
-        # if len(video) < self.n_frames:
-        #     video = np.pad(video, ((0, pad_len), (0, 0), (0, 0), (0, 0)))
-        #     nonterminal[-pad_len:] = 0
-        # if self.external_cond_dim > 0 and len(actions) < self.n_frames:
-        #     pad_len = self.n_frames - len(actions)
-        #     actions = np.pad(actions, ((0, pad_len),))
-        assert len(video) == self.n_frames, f"len(video)={len(video)} != self.n_frames={self.n_frames}, file_idx={file_idx}, frame_idx={frame_idx}"
+        if len(video) < self.n_frames:
+            video = np.pad(video, ((0, pad_len), (0, 0), (0, 0), (0, 0)))
+            nonterminal[-pad_len:] = 0
+        if self.external_cond_dim > 0 and len(actions) < self.n_frames:
+            pad_len = self.n_frames - len(actions)
+            actions = np.pad(actions, ((0, pad_len),))
+        # assert len(video) == self.n_frames, f"len(video)={len(video)} != self.n_frames={self.n_frames}, file_idx={file_idx}, frame_idx={frame_idx}"
 
         video = torch.from_numpy(video / 255.0).float().permute(0, 3, 1, 2).contiguous()
 
