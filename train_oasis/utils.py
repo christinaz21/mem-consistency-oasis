@@ -11,6 +11,23 @@ from einops import rearrange
 from typing import Mapping, Sequence, Tuple, Optional
 import json
 
+class WarmUpScheduler:
+    def __init__(self, optimizer, cfg):
+        self.optimizer = optimizer
+        self.cfg = cfg
+
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+
+    def load_state_dict(self, state_dict) -> None:
+        self.__dict__.update(state_dict)
+
+    def step(self, step):
+        if step < self.cfg.warmup_steps:
+            lr_scale = min(1.0, float(step + 1) / self.cfg.warmup_steps)
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = lr_scale * self.cfg.lr
+
 def sigmoid_beta_schedule(timesteps, start=-3, end=3, tau=1, clamp_min=1e-5):
     """
     sigmoid schedule

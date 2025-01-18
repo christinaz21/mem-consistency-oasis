@@ -21,7 +21,7 @@ from .attention import (
     get_layernorm,
     approx_gelu,
 )
-from .dit import (
+from .blocks import (
     PatchEmbed, 
     modulate, 
     gate,

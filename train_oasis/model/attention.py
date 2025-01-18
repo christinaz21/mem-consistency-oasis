@@ -17,7 +17,6 @@ class TemporalAxialAttention(nn.Module):
         dim_head: int,
         rotary_emb: RotaryEmbedding,
         is_causal: bool = True,
-        enable_flash_attn: bool = False,
         attn_drop: float = 0.0,
     ):
         super().__init__()
@@ -31,7 +30,6 @@ class TemporalAxialAttention(nn.Module):
         self.rotary_emb = rotary_emb
         self.is_causal = is_causal
 
-        self.enable_flash_attn = enable_flash_attn
         self.attn_drop = attn_drop
         self.scale = self.head_dim**-0.5
 
@@ -48,25 +46,7 @@ class TemporalAxialAttention(nn.Module):
         k = self.rotary_emb.rotate_queries_or_keys(k, self.rotary_emb.freqs)
 
         q, k, v = map(lambda t: t.contiguous(), (q, k, v))
-
-        if self.enable_flash_attn:
-            from flash_attn import flash_attn_func
-
-            # (B, #heads, N, #dim) -> (B, N, #heads, #dim)
-            q = q.permute(0, 2, 1, 3)
-            k = k.permute(0, 2, 1, 3)
-            v = v.permute(0, 2, 1, 3)
-            x = flash_attn_func(
-                q,
-                k,
-                v,
-                dropout_p=self.attn_drop if self.training else 0.0,
-                softmax_scale=self.scale,
-                causal=self.is_causal,
-            )
-            x = rearrange(x, "B N H D -> B H N D", B=B * H * W, N=T, H=self.heads)
-        else:
-            x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=self.is_causal)
+        x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=self.is_causal)
 
         x = rearrange(x, "(B H W) h T d -> B T H W (h d)", B=B, H=H, W=W)
         x = x.type_as(q)
@@ -83,7 +63,6 @@ class SpatialAxialAttention(nn.Module):
         heads: int,
         dim_head: int,
         rotary_emb: RotaryEmbedding,
-        enable_flash_attn: bool = False,
         attn_drop: float = 0.0,
     ):
         super().__init__()
@@ -95,7 +74,6 @@ class SpatialAxialAttention(nn.Module):
         self.to_out = nn.Linear(self.inner_dim, dim)
 
         self.rotary_emb = rotary_emb
-        self.enable_flash_attn = enable_flash_attn
         self.attn_drop = attn_drop
         self.scale = self.head_dim**-0.5
 
@@ -116,25 +94,8 @@ class SpatialAxialAttention(nn.Module):
         q = rearrange(q, "(B T) h H W d -> (B T) h (H W) d", B=B, T=T, h=self.heads)
         k = rearrange(k, "(B T) h H W d -> (B T) h (H W) d", B=B, T=T, h=self.heads)
         v = rearrange(v, "(B T) h H W d -> (B T) h (H W) d", B=B, T=T, h=self.heads)
-
-        if self.enable_flash_attn:
-            from flash_attn import flash_attn_func
-
-            # (B, #heads, N, #dim) -> (B, N, #heads, #dim)
-            q = q.permute(0, 2, 1, 3)
-            k = k.permute(0, 2, 1, 3)
-            v = v.permute(0, 2, 1, 3)
-            x = flash_attn_func(
-                q,
-                k,
-                v,
-                dropout_p=self.attn_drop if self.training else 0.0,
-                softmax_scale=self.scale,
-                causal=False,
-            )
-            x = rearrange(x, "B N H D -> B H N D", B=B * T, N= H * W, H=self.heads)
-        else:
-            x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
+        
+        x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
 
         x = rearrange(x, "(B T) h (H W) d -> B T H W (h d)", B=B, H=H, W=W)
         x = x.type_as(q)

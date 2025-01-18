@@ -13,29 +13,19 @@ import torch.nn.functional as F
 from einops import rearrange
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from utils import FrechetVideoDistance, get_validation_metrics_for_videos, log_video, extract, sigmoid_beta_schedule, convert_zero_ckpt_into_state_dict
+from utils import (
+    FrechetVideoDistance, 
+    get_validation_metrics_for_videos, 
+    log_video, 
+    extract, 
+    sigmoid_beta_schedule, 
+    convert_zero_ckpt_into_state_dict,
+    WarmUpScheduler
+)
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
-
-class WarmUpScheduler:
-    def __init__(self, optimizer, cfg):
-        self.optimizer = optimizer
-        self.cfg = cfg
-
-    def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
-
-    def load_state_dict(self, state_dict) -> None:
-        self.__dict__.update(state_dict)
-
-    def step(self, step):
-        if step < self.cfg.warmup_steps:
-            lr_scale = min(1.0, float(step + 1) / self.cfg.warmup_steps)
-            for pg in self.optimizer.param_groups:
-                pg["lr"] = lr_scale * self.cfg.lr
-
 
 class DiffusionForcingVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
