@@ -241,9 +241,9 @@ class Attention(nn.Module):
         else:
             x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=False)
 
-        x_output_shape = (B, N, C)
+        # x_output_shape = (B, N, C)
         # x = x.reshape(x_output_shape)
-        x = rearrange(x, "b n h d -> b n (h d)", b=B, n=N, h=self.num_heads, d=self.head_dim)
+        x = rearrange(x, "b h n d -> b n (h d)", b=B, n=N, h=self.num_heads, d=self.head_dim)
         x = self.proj(x)
         x = self.proj_drop(x)
         x = rearrange(x, "b (t h w) c -> b t h w c", t=T, h=H, w=W)
