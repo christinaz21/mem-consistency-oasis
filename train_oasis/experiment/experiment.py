@@ -1,6 +1,7 @@
 from train_oasis.dataset.minerl import MinerlDataset
 from train_oasis.dataset.minecraftvideo import MinecraftVideoDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
+from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
 
 from typing import Optional, Union
 import pathlib
@@ -27,6 +28,7 @@ class VideoPredictionExperiment:
 
     compatible_algorithms = dict(
         df_video=DiffusionForcingVideo,
+        attn_mem_video=AttentionMemoryTrainer,
     )
 
     compatible_datasets = dict(

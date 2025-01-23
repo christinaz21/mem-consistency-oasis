@@ -30,3 +30,22 @@ Download data:
     - experiment.training.batch_size
 
 6. python train_oasis/main.py
+
+## Attention memory
+
+### New Features
+
+1. Stride: A new parameter has been introduced.
+2. Difference between max_frames and n_frames:
+    - max_frames refers to the number of frames that will be imported into the model.
+
+    - n_frames refers to the number of frames loaded from the dataset.
+3. Two parameter groups for the optimizer: The weight_decay parameter is set to 0 for the attention memory global weight.
+4. Noise levels: Noise levels remain consistent within a chunk, whether during training or inference.
+
+### To run the code
+
+The process is similar to running Diffusion Force. You need to configure the settings and specify the paths. Here are some important configuration details:
+
+1. You can adjust `max_frames` and `n_frames` based on your GPU memory capacity. Ensure that `context_length` and `stride` are set to half of `max_frames`.
+2. You can set the training strategy to **deepspeed**, but note that it will consume more memory.
