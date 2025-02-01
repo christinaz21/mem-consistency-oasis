@@ -115,8 +115,8 @@ class DiT(nn.Module):
         self.t_embedder = TimestepEmbedder(hidden_size, dtype=dtype)
         frame_h, frame_w = self.x_embedder.grid_size
 
-        self.spatial_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads // 2, freqs_for="pixel", max_freq=256)
-        self.temporal_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads)
+        self.spatial_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads // 4, freqs_for="pixel", max_freq=256)
+        self.temporal_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads // 2)
         self.external_cond = nn.Linear(external_cond_dim, hidden_size) if external_cond_dim > 0 else nn.Identity()
 
         self.blocks = nn.ModuleList(

@@ -28,6 +28,3 @@ experiment:
   validation:
     batch_size: 1
     limit_batch: 1
-  
-algorithm:
-  vae_ckpt: /data/taiye/Project/open-oasis/models/oasis500m/vit-l-20.safetensors

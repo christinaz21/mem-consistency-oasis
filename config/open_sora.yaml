@@ -36,7 +36,6 @@ experiment:
   
 algorithm:
   warmup_steps: 6000
-  vae_ckpt: /data/taiye/Project/open-oasis/models/oasis500m/vit-l-20.safetensors
 
 dataset:
   external_cond_dim: 25
