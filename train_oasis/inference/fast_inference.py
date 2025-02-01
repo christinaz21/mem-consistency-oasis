@@ -108,7 +108,7 @@ def main(args):
         x = rearrange(x, "b t c h w -> (b t) c h w")
         with torch.no_grad():
             with autocast("cuda", dtype=torch.half):
-                x = vae.encode(x * 2 - 1).mean * scaling_factor
+                x = vae.encode(x).mean * scaling_factor
         x = rearrange(x, "(b t) (h w) c -> b t c h w", t=n_prompt_frames, h=H // vae.patch_size, w=W // vae.patch_size)
 
     print("x shape: ", x.shape)
@@ -125,6 +125,15 @@ def main(args):
     for i in range(max_frame-1):
         for step in range(ddim_one_step+1):
             noise_level_matrix[step, i] = noise_range[step + i*ddim_one_step]
+
+    '''
+    max_frame = 10, ddim_noise_steps = 36
+    0 4 8 12 16 20 24 28 32
+    1 5 9 13 17 21 25 29 33
+    2 6 10 14 18 22 26 30 34
+    3 7 11 15 19 23 27 31 35
+    4 8 12 16 20 24 28 32 36
+    '''
     bar = tqdm(range(n_prompt_frames, total_frames + max_frame - 2))
     bar.set_description("Generating frames")
     for i in range(n_prompt_frames, total_frames):
