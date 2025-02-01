@@ -25,13 +25,13 @@ experiment:
     precision: bf16-mixed
     devices: auto
     strategy: ddp
-    batch_size: 2
+    batch_size: 8
     checkpointing:
       every_n_train_steps: 10000
   validation:
     precision: bf16-mixed
     strategy: ddp
-    batch_size: 2
+    batch_size: 4
     limit_batch: 1
     val_every_n_step: 3000
 
@@ -39,3 +39,9 @@ dataset:
   n_frames: 32
   context_length: 4
   validation_multiplier: 2
+
+algorithm:
+  gradient_checkpointing: true
+
+model:
+  bptt: true

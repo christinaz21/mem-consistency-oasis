@@ -104,26 +104,48 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
     def _build_model(self, model_ckpt):
         if self.model_cfg._name == "attn_mem_dit":
-            from train_oasis.model.attn_mem_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.model_cfg.max_frames,
-                stride=self.model_cfg.stride,
-                stabilization_level=self.stabilization_level,
-                clip_noise=self.clip_noise,
-                timesteps=self.timesteps,
-                delta_update=self.model_cfg.delta_update,
-                bptt=self.model_cfg.bptt,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
+            if self.gradient_checkpointing:
+                from train_oasis.model.attn_mem_dit_ckpt import DiT
+                self.diffusion_model = DiT(
+                    input_h=self.model_cfg.input_h,
+                    input_w=self.model_cfg.input_w,
+                    patch_size=self.model_cfg.patch_size,
+                    in_channels=self.model_cfg.in_channels,
+                    hidden_size=self.model_cfg.hidden_size,
+                    depth=self.model_cfg.depth,
+                    num_heads=self.model_cfg.num_heads,
+                    mlp_ratio=self.model_cfg.mlp_ratio,
+                    external_cond_dim=self.external_cond_dim,
+                    max_frames=self.model_cfg.max_frames,
+                    stride=self.model_cfg.stride,
+                    stabilization_level=self.stabilization_level,
+                    clip_noise=self.clip_noise,
+                    timesteps=self.timesteps,
+                    delta_update=self.model_cfg.delta_update,
+                    bptt=self.model_cfg.bptt,
+                    dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+                )
+            else:
+                from train_oasis.model.attn_mem_dit import DiT
+                self.diffusion_model = DiT(
+                    input_h=self.model_cfg.input_h,
+                    input_w=self.model_cfg.input_w,
+                    patch_size=self.model_cfg.patch_size,
+                    in_channels=self.model_cfg.in_channels,
+                    hidden_size=self.model_cfg.hidden_size,
+                    depth=self.model_cfg.depth,
+                    num_heads=self.model_cfg.num_heads,
+                    mlp_ratio=self.model_cfg.mlp_ratio,
+                    external_cond_dim=self.external_cond_dim,
+                    max_frames=self.model_cfg.max_frames,
+                    stride=self.model_cfg.stride,
+                    stabilization_level=self.stabilization_level,
+                    clip_noise=self.clip_noise,
+                    timesteps=self.timesteps,
+                    delta_update=self.model_cfg.delta_update,
+                    bptt=self.model_cfg.bptt,
+                    dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+                )
         else:
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
         
@@ -247,7 +269,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
             + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
-
+    
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         xs, conditions, masks = self._preprocess_batch(batch)
         xs_gt = xs.clone()
@@ -256,20 +278,11 @@ class AttentionMemoryTrainer(pl.LightningModule):
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
         noise_levels = self._generate_noise_levels(xs, masks)
         noised_x = self.q_sample(x_start=xs, t=noise_levels, noise=noise)
-        if self.gradient_checkpointing:
-            model_pred = checkpoint(
-                self.diffusion_model,
-                x=rearrange(noised_x, "t b ... -> b t ..."),
-                t=rearrange(noise_levels, "t b -> b t"),
-                external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
-                use_reentrant=True,
-            )
-        else:
-            model_pred = self.diffusion_model(
-                x=rearrange(noised_x, "t b ... -> b t ..."),
-                t=rearrange(noise_levels, "t b -> b t"),
-                external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
-            )
+        model_pred = self.diffusion_model(
+            x=rearrange(noised_x, "t b ... -> b t ..."),
+            t=rearrange(noise_levels, "t b -> b t"),
+            external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
+        )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
         assert torch.isnan(model_pred).sum() == 0, "model prediction contains NaN."
 
