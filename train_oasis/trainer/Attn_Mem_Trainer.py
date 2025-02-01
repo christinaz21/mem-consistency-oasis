@@ -25,6 +25,7 @@ from utils import (
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
+from torch.utils.checkpoint import checkpoint
 
 class WarmUpScheduler:
     def __init__(self, optimizer, cfg):
@@ -70,6 +71,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
+        self.gradient_checkpointing = cfg.gradient_checkpointing
 
         self.stride = model_cfg.stride
         
@@ -119,6 +121,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
                 clip_noise=self.clip_noise,
                 timesteps=self.timesteps,
                 delta_update=self.model_cfg.delta_update,
+                bptt=self.model_cfg.bptt,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
         else:
@@ -253,11 +256,20 @@ class AttentionMemoryTrainer(pl.LightningModule):
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
         noise_levels = self._generate_noise_levels(xs, masks)
         noised_x = self.q_sample(x_start=xs, t=noise_levels, noise=noise)
-        model_pred = self.diffusion_model(
-            x=rearrange(noised_x, "t b ... -> b t ..."),
-            t=rearrange(noise_levels, "t b -> b t"),
-            external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
-        )
+        if self.gradient_checkpointing:
+            model_pred = checkpoint(
+                self.diffusion_model,
+                x=rearrange(noised_x, "t b ... -> b t ..."),
+                t=rearrange(noise_levels, "t b -> b t"),
+                external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
+                use_reentrant=True,
+            )
+        else:
+            model_pred = self.diffusion_model(
+                x=rearrange(noised_x, "t b ... -> b t ..."),
+                t=rearrange(noise_levels, "t b -> b t"),
+                external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
+            )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
         assert torch.isnan(model_pred).sum() == 0, "model prediction contains NaN."
 

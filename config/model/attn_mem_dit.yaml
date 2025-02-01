@@ -8,5 +8,6 @@ num_heads: 16
 mlp_ratio: 4.0
 stride: 4
 delta_update: true
+bptt: true
 max_frames: 8
 precision: bf16-mixed

@@ -26,7 +26,6 @@ from .blocks import (
 def sigma_act(x):
     return F.elu(x) + 1
 
-@torch.no_grad()
 def updateMemory(kv_mem, k, v, z, delta=False):
     if delta and (kv_mem is not None):
         sigma_k = sigma_act(k)
@@ -54,7 +53,6 @@ def updateMemory(kv_mem, k, v, z, delta=False):
         new_kv_mem = kv_mem + new_kv_mem
     return new_kv_mem
 
-@torch.no_grad()
 def getAttnMem(kv_mem, z, q):
     assert kv_mem is not None, "Attention memory must be provided"
     sigma_q = sigma_act(q)
@@ -76,7 +74,6 @@ def getAttnMem(kv_mem, z, q):
     retrieved_memory = retrieved_memory / denominator
     return retrieved_memory
 
-@torch.no_grad()
 def updateZ(z, k):
     # k: (B, h, N, d)
     k = sigma_act(k)
@@ -95,6 +92,7 @@ class TemporalAxialAttention(nn.Module):
         is_causal: bool = True,
         attn_drop: float = 0.0,
         delta_update: bool = False,
+        bptt: bool = False,
     ):
         super().__init__()
         self.delta_update = delta_update
@@ -107,6 +105,7 @@ class TemporalAxialAttention(nn.Module):
 
         self.rotary_emb = rotary_emb
         self.is_causal = is_causal
+        self.bptt = bptt
 
         self.attn_drop = attn_drop
         self.scale = self.head_dim**-0.5
@@ -127,8 +126,13 @@ class TemporalAxialAttention(nn.Module):
         k = rearrange(k, "B T H W (h d) -> (B H W) h T d", h=self.heads)
         v = rearrange(v, "B T H W (h d) -> (B H W) h T d", h=self.heads)
 
-        new_mem = updateMemory(mem, k, v, z, self.delta_update)
-        new_z = updateZ(z, k)
+        if self.bptt:
+            new_mem = updateMemory(mem, k, v, z, self.delta_update)
+            new_z = updateZ(z, k)
+        else:
+            with torch.no_grad():
+                new_mem = updateMemory(mem, k, v, z, self.delta_update)
+                new_z = updateZ(z, k)
 
         q = self.rotary_emb.rotate_queries_or_keys(q, self.rotary_emb.freqs)
         k = self.rotary_emb.rotate_queries_or_keys(k, self.rotary_emb.freqs)
@@ -156,6 +160,7 @@ class SpatialAxialAttention(nn.Module):
         rotary_emb: RotaryEmbedding,
         attn_drop: float = 0.0,
         delta_update: bool = False,
+        bptt: bool = False,
     ):
         super().__init__()
         self.delta_update = delta_update
@@ -169,6 +174,7 @@ class SpatialAxialAttention(nn.Module):
         self.rotary_emb = rotary_emb
         self.attn_drop = attn_drop
         self.scale = self.head_dim**-0.5
+        self.bptt = bptt
 
         self.mem_beta = nn.Parameter(torch.zeros(1, heads, 1, 1))
 
@@ -185,8 +191,13 @@ class SpatialAxialAttention(nn.Module):
         k = rearrange(k, "B T H W (h d) -> (B T) h H W d", h=self.heads)
         v = rearrange(v, "B T H W (h d) -> (B T) h H W d", h=self.heads)
 
-        new_mem = updateMemory(mem, rearrange(k, "BT h H W d -> BT h (H W) d"), rearrange(v, "BT h H W d -> BT h (H W) d"), z, self.delta_update)
-        new_z = updateZ(z, rearrange(k, "BT h H W d -> BT h (H W) d"))
+        if self.bptt:
+            new_mem = updateMemory(mem, rearrange(k, "BT h H W d -> BT h (H W) d"), rearrange(v, "BT h H W d -> BT h (H W) d"), z, self.delta_update)
+            new_z = updateZ(z, rearrange(k, "BT h H W d -> BT h (H W) d"))
+        else:
+            with torch.no_grad():
+                new_mem = updateMemory(mem, rearrange(k, "BT h H W d -> BT h (H W) d"), rearrange(v, "BT h H W d -> BT h (H W) d"), z, self.delta_update)
+                new_z = updateZ(z, rearrange(k, "BT h H W d -> BT h (H W) d"))
         
         freqs = self.rotary_emb.get_axial_freqs(H, W)
         q = apply_rotary_emb(freqs, q)
@@ -218,7 +229,8 @@ class SpatioTemporalDiTBlock(nn.Module):
         is_causal=True,
         spatial_rotary_emb: Optional[RotaryEmbedding] = None,
         temporal_rotary_emb: Optional[RotaryEmbedding] = None,
-        delta_update: bool = False
+        delta_update: bool = False,
+        bptt: bool = False,
     ):
         super().__init__()
         self.is_causal = is_causal
@@ -232,6 +244,7 @@ class SpatioTemporalDiTBlock(nn.Module):
             dim_head=hidden_size // num_heads,
             rotary_emb=spatial_rotary_emb,
             delta_update=delta_update,
+            bptt=bptt,
         )
         self.s_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.s_mlp = Mlp(
@@ -250,6 +263,7 @@ class SpatioTemporalDiTBlock(nn.Module):
             is_causal=is_causal,
             rotary_emb=temporal_rotary_emb,
             delta_update=delta_update,
+            bptt=bptt,
         )
         self.t_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.t_mlp = Mlp(
@@ -305,6 +319,7 @@ class DiT(nn.Module):
         clip_noise=6,
         timesteps=1000,
         delta_update=False,
+        bptt=False,
         dtype=torch.float32,
     ):
         super().__init__()
@@ -318,6 +333,7 @@ class DiT(nn.Module):
         self.clip_noise = clip_noise
         self.timesteps = timesteps
         self.delta_update = delta_update
+        self.bptt = bptt
         self.dtype = dtype
 
         assert stride*2 == max_frames, "Stride must be half of max_frames"
@@ -340,6 +356,7 @@ class DiT(nn.Module):
                     spatial_rotary_emb=self.spatial_rotary_emb,
                     temporal_rotary_emb=self.temporal_rotary_emb,
                     delta_update=delta_update,
+                    bptt=bptt,
                 )
                 for _ in range(depth)
             ]
@@ -526,20 +543,3 @@ class DiT(nn.Module):
             x[:, n_context_frames:] = x_pred[:, n_context_frames:]
 
         return x, new_kv_mem
-
-def dit_cty():
-    return DiT(
-        input_h=18,
-        input_w=32,
-        in_channels=16,
-        patch_size=2,
-        hidden_size=1024,
-        depth=16,
-        num_heads=16,
-        external_cond_dim=25,
-        max_frames=10
-    )
-
-DiT_models = {
-    "dit_cty": dit_cty
-}

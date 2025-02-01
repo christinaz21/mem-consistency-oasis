@@ -21,6 +21,7 @@ weight_decay: 2e-3
 warmup_steps: 10000
 optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
+gradient_checkpointing: true
 
 save_video_every_n_step: 1000 # save a video every n train steps
 

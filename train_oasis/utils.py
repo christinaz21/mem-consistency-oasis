@@ -647,3 +647,14 @@ def convert_zero_ckpt_into_state_dict(zero_ckpt_path):
         if key.startswith("diffusion_model."):
             state_dict[key[16:]] = value
     return state_dict
+
+import yaml
+def load_attn_mem_from_yaml(yaml_path):
+    with open(yaml_path, "r") as f:
+        attn_mem = yaml.safe_load(f)
+    return attn_mem
+
+if __name__ == "__main__":
+    # Test the function to load attention memory from yaml
+    attn_mem = load_attn_mem_from_yaml("config/model/attn_mem_dit.yaml")
+    print(attn_mem)
