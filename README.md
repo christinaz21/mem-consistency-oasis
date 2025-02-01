@@ -42,6 +42,8 @@ Download data:
     - n_frames refers to the number of frames loaded from the dataset.
 3. Two parameter groups for the optimizer: The weight_decay parameter is set to 0 for the attention memory global weight.
 4. Noise levels: Noise levels remain consistent within a chunk, whether during training or inference.
+5. Gradient checkpointing: You can set gradient_checkpointing to reduce memory usage. Both `deepspeed` and `ddp` can be used.
+6. bptt
 
 ### To run the code
 
