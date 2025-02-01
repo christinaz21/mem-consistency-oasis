@@ -1,31 +1,15 @@
-## Dataset
+## TODO
 
-enbedding / initial
+1. gradient checkpoint
+2. memory gradient
+3. memory inference
+4. YaRN
 
-## Model
+## Question
 
-clipped_snr
-
-external_cond_dim
-
-cum_snr_decay
-
-## Trainer
-
-lr_scheduler
-
-sample
-
-## Need to understand
-
-sample_step (DDIM) code & paper
-
-DiT architecture
-
-# Question
-
-prediction v x
-
-LSTM & long prediction
-
-VQGAN
+```python
+# max_seq_len： 4096 * 4， original_seq_len： 4096，args.mscale： 1， args.rope_factor： 40
+if args.max_seq_len > args.original_seq_len:
+    mscale = 0.1 * args.mscale * math.log(args.rope_factor) + 1.0
+    self.softmax_scale = self.softmax_scale * mscale * mscale
+ ```

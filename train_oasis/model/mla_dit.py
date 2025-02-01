@@ -1,16 +1,12 @@
-"""
-References:
-    - DiT: https://github.com/facebookresearch/DiT/blob/main/models.py
-    - Diffusion Forcing: https://github.com/buoyancy99/diffusion-forcing/blob/main/algorithms/diffusion_forcing/models/unet3d.py
-    - Latte: https://github.com/Vchitect/Latte/blob/main/models/latte.py
-"""
-
 from typing import Optional
 import torch
 from torch import nn
 from train_oasis.model.rotary_embedding_torch import RotaryEmbedding
 from einops import rearrange
-from train_oasis.model.attention import SpatialAxialAttention, TemporalAxialAttention
+from train_oasis.model.attention import (
+    TemporalAxialMLA, 
+    SpatialAxialMLA,
+)
 from timm.models.vision_transformer import Mlp
 from .blocks import (
     PatchEmbed, 
@@ -25,6 +21,7 @@ class SpatioTemporalDiTBlock(nn.Module):
         self,
         hidden_size,
         num_heads,
+        lora_rank,
         mlp_ratio=4.0,
         is_causal=True,
         spatial_rotary_emb: Optional[RotaryEmbedding] = None,
@@ -36,11 +33,12 @@ class SpatioTemporalDiTBlock(nn.Module):
         approx_gelu = lambda: nn.GELU(approximate="tanh")
 
         self.s_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.s_attn = SpatialAxialAttention(
+        self.s_attn = SpatialAxialMLA(
             hidden_size,
             heads=num_heads,
             dim_head=hidden_size // num_heads,
             rotary_emb=spatial_rotary_emb,
+            lora_rank=lora_rank,
         )
         self.s_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.s_mlp = Mlp(
@@ -52,12 +50,13 @@ class SpatioTemporalDiTBlock(nn.Module):
         self.s_adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(hidden_size, 6 * hidden_size, bias=True))
 
         self.t_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.t_attn = TemporalAxialAttention(
+        self.t_attn = TemporalAxialMLA(
             hidden_size,
             heads=num_heads,
             dim_head=hidden_size // num_heads,
             is_causal=is_causal,
             rotary_emb=temporal_rotary_emb,
+            lora_rank=lora_rank,
         )
         self.t_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.t_mlp = Mlp(
@@ -96,6 +95,7 @@ class DiT(nn.Module):
         patch_size=2,
         in_channels=16,
         hidden_size=1024,
+        lora_rank=256,
         depth=12,
         num_heads=16,
         mlp_ratio=4.0,
@@ -124,6 +124,7 @@ class DiT(nn.Module):
                 SpatioTemporalDiTBlock(
                     hidden_size,
                     num_heads,
+                    lora_rank,
                     mlp_ratio=mlp_ratio,
                     is_causal=True,
                     spatial_rotary_emb=self.spatial_rotary_emb,
@@ -213,43 +214,3 @@ class DiT(nn.Module):
 
         return x
 
-
-def DiT_S_2():
-    return DiT(
-        patch_size=2,
-        hidden_size=1024,
-        depth=16,
-        num_heads=16,
-    )
-
-def dit_small():
-    return DiT(
-        input_h=64,
-        input_w=64,
-        in_channels=3,
-        patch_size=2,
-        hidden_size=256,
-        depth=16,
-        num_heads=16,
-        external_cond_dim=4,
-        max_frames=10
-    )
-
-def dit_cty():
-    return DiT(
-        input_h=18,
-        input_w=32,
-        in_channels=16,
-        patch_size=2,
-        hidden_size=1024,
-        depth=16,
-        num_heads=16,
-        external_cond_dim=25,
-        max_frames=10
-    )
-
-DiT_models = {
-    "DiT-S/2": DiT_S_2,
-    "dit_small": dit_small,
-    "dit_cty": dit_cty
-}

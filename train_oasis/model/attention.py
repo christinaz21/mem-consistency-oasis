@@ -209,3 +209,192 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         x = rearrange(x, "b (t h w) c -> b t h w c", t=T, h=H, w=W)
         return x
+
+class RMSNorm(nn.Module):
+    """
+    Root Mean Square Layer Normalization (RMSNorm).
+
+    Args:
+        dim (int): Dimension of the input tensor.
+        eps (float): Epsilon value for numerical stability. Defaults to 1e-6.
+    """
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor):
+        """
+        Forward pass for RMSNorm.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Normalized tensor with the same shape as input.
+        """
+        return F.rms_norm(x, (self.dim,), self.weight, self.eps)
+
+class MLA(nn.Module):
+    """
+    Multi-Headed Attention Layer (MLA).
+
+    Attributes:
+        dim (int): Dimensionality of the input features.
+        n_heads (int): Number of attention heads.
+        kv_lora_rank (int): Rank for low-rank key/value projection.
+        qk_nope_head_dim (int): Dimensionality of non-positional query/key projections.
+        qk_rope_head_dim (int): Dimensionality of rotary-positional query/key projections.
+        v_head_dim (int): Dimensionality of value projections.
+        softmax_scale (float): Scaling factor for softmax in attention computation.
+    """
+    def __init__(
+        self, 
+        dim, 
+        n_heads, 
+        kv_lora_rank,
+        qk_nope_head_dim,
+        qk_rope_head_dim,
+        v_head_dim,
+    ):
+        super().__init__()
+        self.dim = dim
+        self.n_heads = n_heads
+        self.kv_lora_rank = kv_lora_rank
+        self.qk_nope_head_dim = qk_nope_head_dim
+        self.qk_rope_head_dim = qk_rope_head_dim
+        self.qk_head_dim = qk_nope_head_dim + qk_rope_head_dim
+        self.v_head_dim = v_head_dim
+
+        # query projection
+        # self.wq_a = nn.Linear(self.dim, self.q_lora_rank)
+        # self.q_norm = RMSNorm(self.q_lora_rank)
+        # self.wq_b = nn.Linear(self.q_lora_rank, self.n_heads * self.qk_head_dim)
+        self.wq = nn.Linear(self.dim, self.n_heads * self.qk_head_dim)
+        
+        self.wkv_a = nn.Linear(self.dim, self.kv_lora_rank + self.qk_rope_head_dim)
+        self.kv_norm = RMSNorm(self.kv_lora_rank)
+        self.wkv_b = nn.Linear(self.kv_lora_rank, self.n_heads * (self.qk_nope_head_dim + self.v_head_dim), bias=False)
+        self.wo = nn.Linear(self.n_heads * self.v_head_dim, self.dim)
+        self.softmax_scale = self.qk_head_dim ** -0.5
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None, rope_func=None):
+        """
+        Forward pass for the Multi-Headed Attention Layer (MLA).
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, dim).
+            start_pos (int): Starting position in the sequence for caching.
+            freqs_cis (torch.Tensor): Precomputed complex exponential values for rotary embeddings.
+            mask (Optional[torch.Tensor]): Mask tensor to exclude certain positions from attention.
+
+        Returns:
+            torch.Tensor: Output tensor with the same shape as the input.
+        """
+        bsz, seqlen, _ = x.size()
+        # q = self.wq_b(self.q_norm(self.wq_a(x))) # (bsz, seqlen, n_heads * qk_head_dim)
+        q = self.wq(x)
+        q = q.view(bsz, seqlen, self.n_heads, self.qk_head_dim) # (bsz, seqlen, n_heads, qk_head_dim)
+        q_nope, q_pe = torch.split(q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+        # (bsz, seqlen, n_heads, qk_nope_head_dim), (bsz, seqlen, n_heads, qk_rope_head_dim)
+        q_pe = rearrange(q_pe, "b s h d -> b s (h d)")
+        q_pe = rope_func(q_pe)
+        q_pe = rearrange(q_pe, "b s (h d) -> b s h d", h=self.n_heads)
+        q = torch.cat([q_nope, q_pe], dim=-1) # (bsz, seqlen, n_heads, qk_head_dim)
+        kv = self.wkv_a(x) # (bsz, seqlen, kv_lora_rank + qk_rope_head_dim)
+        kv, k_pe = torch.split(kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+        # (bsz, seqlen, kv_lora_rank), (bsz, seqlen, qk_rope_head_dim)
+        k_pe = rope_func(k_pe)
+
+        kv = self.kv_norm(kv) # (bsz, seqlen, kv_lora_rank)
+        # kv = self.wkv_b(kv) # (bsz, seqlen, n_heads * (qk_nope_head_dim + v_head_dim))
+        # kv = kv.view(bsz, seqlen, self.n_heads, self.qk_nope_head_dim + self.v_head_dim)
+        # k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
+        # k = torch.cat([k_nope, k_pe.expand(-1, -1, self.n_heads, -1)], dim=-1) # (bsz, seqlen, n_heads, qk_head_dim)
+        
+        wkv_b = self.wkv_b.weight
+        wkv_b = wkv_b.view(self.n_heads, -1, self.kv_lora_rank) # (n_heads, self.qk_nope_head_dim + self.v_head_dim, kv_lora_rank)
+        q_nope = torch.einsum("bshd,hdc->bshc", q_nope, wkv_b[:, :self.qk_nope_head_dim])
+        scores = (torch.einsum("bshc,btc->bsht", q_nope, kv) +
+                    torch.einsum("bshr,btr->bsht", q_pe, k_pe)) * self.softmax_scale
+        if mask is not None:
+            scores += mask.unsqueeze(1)
+        scores = scores.softmax(dim=-1, dtype=torch.float32).type_as(x)
+        x = torch.einsum("bsht,btc->bshc", scores, kv)
+        x = torch.einsum("bshc,hdc->bshd", x, wkv_b[:, -self.v_head_dim:])
+        x = rearrange(x, "b s h d -> b s (h d)")
+        x = self.wo(x)
+        return x
+
+class TemporalAxialMLA(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        heads: int,
+        dim_head: int,
+        rotary_emb: RotaryEmbedding,
+        lora_rank: int,
+        is_causal: bool = True,
+        attn_drop: float = 0.0,
+    ):
+        super().__init__()
+        self.rotary_emb = rotary_emb
+        rope_func = lambda x: self.rotary_emb.rotate_queries_or_keys(x, self.rotary_emb.freqs)
+        self.rope_func = rope_func
+        self.attn = MLA(
+            dim=dim,
+            n_heads=heads,
+            kv_lora_rank=lora_rank,
+            qk_nope_head_dim=dim_head,
+            qk_rope_head_dim=dim_head // 2,
+            v_head_dim=dim_head,
+        )
+        self.is_causal = is_causal
+        self.attn_drop = attn_drop
+
+    def forward(self, x: torch.Tensor):
+        B, T, H, W, D = x.shape
+        x = rearrange(x, "B T H W D -> (B H W) T D")
+        if self.is_causal and self.training:
+            mask = torch.tril(torch.ones(T, T)).to(x.device)
+        x = self.attn(x, mask, self.rope_func)
+        x = rearrange(x, "(B H W) T D -> B T H W D", B=B, H=H, W=W, T=T, D=D)
+        return x
+
+
+class SpatialAxialMLA(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        heads: int,
+        dim_head: int,
+        rotary_emb: RotaryEmbedding,
+        lora_rank: int,
+        attn_drop: float = 0.0,
+    ):
+        super().__init__()
+        self.rotary_emb = rotary_emb
+        self.attn = MLA(
+            dim=dim,
+            n_heads=heads,
+            kv_lora_rank=lora_rank,
+            qk_nope_head_dim=dim_head,
+            qk_rope_head_dim=dim_head // 2,
+            v_head_dim=dim_head,
+        )
+        self.attn_drop = attn_drop
+
+    def forward(self, x: torch.Tensor):
+        B, T, H, W, D = x.shape
+        x = rearrange(x, "B T H W D -> (B T) (H W) D")
+        def rope_func(x):
+            freqs = self.rotary_emb.get_axial_freqs(H, W)
+            x = rearrange(x, "(B T) (H W) D -> (B T) H W D", B=B, T=T, H=H, W=W)
+            x = apply_rotary_emb(freqs, x)
+            x = rearrange(x, "(B T) H W D -> (B T) (H W) D", B=B, T=T, H=H, W=W)
+            return x
+
+        x = self.attn(x, rope_func)
+        x = rearrange(x, "(B T) (H W) D -> B T H W D", B=B, T=T, H=H, W=W, D=D)
+        return x
