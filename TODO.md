@@ -13,3 +13,7 @@ if args.max_seq_len > args.original_seq_len:
     mscale = 0.1 * args.mscale * math.log(args.rope_factor) + 1.0
     self.softmax_scale = self.softmax_scale * mscale * mscale
  ```
+
+ ## insight
+
+ 1. attention memory 可以只用和stride等长的memory
