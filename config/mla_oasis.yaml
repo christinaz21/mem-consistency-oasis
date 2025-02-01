@@ -23,8 +23,8 @@ experiment:
   training:
     precision: bf16-mixed
     devices: auto
-    strategy: deepspeed
-    batch_size: 12
+    strategy: ddp
+    batch_size: 32
     checkpointing:
       every_n_train_steps: 10000
   validation:
@@ -42,3 +42,4 @@ dataset:
 
 model:
   precision: bf16-mixed
+  gradient_checkpointing: true

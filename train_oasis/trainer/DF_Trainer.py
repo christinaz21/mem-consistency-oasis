@@ -126,6 +126,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 mlp_ratio=self.model_cfg.mlp_ratio,
                 external_cond_dim=self.external_cond_dim,
                 max_frames=self.cfg.n_frames,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
         else:
