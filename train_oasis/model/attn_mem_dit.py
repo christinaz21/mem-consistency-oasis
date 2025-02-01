@@ -22,6 +22,7 @@ from .blocks import (
     FinalLayer,
     TimestepEmbedder,
 )
+from torch.utils.checkpoint import checkpoint
 
 def sigma_act(x):
     return F.elu(x) + 1
@@ -331,6 +332,7 @@ class DiT(nn.Module):
         timesteps=1000,
         delta_update=False,
         bptt=False,
+        gradient_ckeckpointing=False,
         dtype=torch.float32,
     ):
         super().__init__()
@@ -345,6 +347,7 @@ class DiT(nn.Module):
         self.timesteps = timesteps
         self.delta_update = delta_update
         self.bptt = bptt
+        self.gradient_ckeckpointing = gradient_ckeckpointing
         self.dtype = dtype
 
         assert stride*2 == max_frames, "Stride must be half of max_frames"
@@ -486,9 +489,15 @@ class DiT(nn.Module):
             # first step
             kv_mem = [None] * len(self.blocks)
         for block, one_kv_mem in zip(self.blocks, kv_mem):
-            x, new_one_kv_mem = block(x, c, one_kv_mem)  # (N, T, H, W, D)
+            if self.gradient_ckeckpointing and self.training:
+                x, new_one_kv_mem = checkpoint(block, x, c, one_kv_mem, use_reentrant=False)
+            else:
+                x, new_one_kv_mem = block(x, c, one_kv_mem)  # (N, T, H, W, D)
             new_kv_mem.append(new_one_kv_mem)
-        x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
+        if self.gradient_ckeckpointing and self.training:
+            x = checkpoint(self.final_layer, x, c, use_reentrant=False)
+        else:
+            x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
         # unpatchify
         x = rearrange(x, "b t h w d -> (b t) h w d")
         x = self.unpatchify(x)  # (N, out_channels, H, W)

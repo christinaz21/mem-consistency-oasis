@@ -104,48 +104,27 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
     def _build_model(self, model_ckpt):
         if self.model_cfg._name == "attn_mem_dit":
-            if self.gradient_checkpointing:
-                from train_oasis.model.attn_mem_dit_ckpt import DiT
-                self.diffusion_model = DiT(
-                    input_h=self.model_cfg.input_h,
-                    input_w=self.model_cfg.input_w,
-                    patch_size=self.model_cfg.patch_size,
-                    in_channels=self.model_cfg.in_channels,
-                    hidden_size=self.model_cfg.hidden_size,
-                    depth=self.model_cfg.depth,
-                    num_heads=self.model_cfg.num_heads,
-                    mlp_ratio=self.model_cfg.mlp_ratio,
-                    external_cond_dim=self.external_cond_dim,
-                    max_frames=self.model_cfg.max_frames,
-                    stride=self.model_cfg.stride,
-                    stabilization_level=self.stabilization_level,
-                    clip_noise=self.clip_noise,
-                    timesteps=self.timesteps,
-                    delta_update=self.model_cfg.delta_update,
-                    bptt=self.model_cfg.bptt,
-                    dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-                )
-            else:
-                from train_oasis.model.attn_mem_dit import DiT
-                self.diffusion_model = DiT(
-                    input_h=self.model_cfg.input_h,
-                    input_w=self.model_cfg.input_w,
-                    patch_size=self.model_cfg.patch_size,
-                    in_channels=self.model_cfg.in_channels,
-                    hidden_size=self.model_cfg.hidden_size,
-                    depth=self.model_cfg.depth,
-                    num_heads=self.model_cfg.num_heads,
-                    mlp_ratio=self.model_cfg.mlp_ratio,
-                    external_cond_dim=self.external_cond_dim,
-                    max_frames=self.model_cfg.max_frames,
-                    stride=self.model_cfg.stride,
-                    stabilization_level=self.stabilization_level,
-                    clip_noise=self.clip_noise,
-                    timesteps=self.timesteps,
-                    delta_update=self.model_cfg.delta_update,
-                    bptt=self.model_cfg.bptt,
-                    dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-                )
+            from train_oasis.model.attn_mem_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.model_cfg.max_frames,
+                stride=self.model_cfg.stride,
+                stabilization_level=self.stabilization_level,
+                clip_noise=self.clip_noise,
+                timesteps=self.timesteps,
+                delta_update=self.model_cfg.delta_update,
+                bptt=self.model_cfg.bptt,
+                gradient_ckeckpointing=self.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
         else:
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
         
