@@ -358,6 +358,8 @@ class TemporalAxialMLA(nn.Module):
         x = rearrange(x, "B T H W D -> (B H W) T D")
         if self.is_causal and self.training:
             mask = torch.tril(torch.ones(T, T)).to(x.device)
+        else:
+            mask = None
         x = self.attn(x=x, mask=mask, rope_func=self.rope_func)
         x = rearrange(x, "(B H W) T D -> B T H W D", B=B, H=H, W=W, T=T, D=D)
         return x
