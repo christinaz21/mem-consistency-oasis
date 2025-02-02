@@ -5,7 +5,6 @@ By its MIT license, you must keep the above sentence in `README.md`
 and the `LICENSE` file to credit the author.
 """
 from typing import Any, Union, Sequence, Optional
-from tqdm import tqdm
 from omegaconf import DictConfig
 import numpy as np
 import torch
@@ -20,7 +19,6 @@ from utils import (
     extract, 
     sigmoid_beta_schedule, 
     convert_zero_ckpt_into_state_dict,
-    is_rank_zero,
 )
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -274,7 +272,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
             self.global_nan_number += 1
             self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
             output_dict = {
-                "loss": torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device),
+                "loss": loss,
             }
             return output_dict
         else:

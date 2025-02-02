@@ -258,7 +258,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             self.global_nan_number += 1
             self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
             output_dict = {
-                "loss": torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device),
+                "loss": loss,
             }
             return output_dict
         else:
