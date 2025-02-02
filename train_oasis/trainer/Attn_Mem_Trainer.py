@@ -20,12 +20,13 @@ from utils import (
     extract, 
     sigmoid_beta_schedule, 
     convert_zero_ckpt_into_state_dict,
+    is_rank_zero,
 )
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
-from torch.utils.checkpoint import checkpoint
+from torch import distributed as dist
 
 class WarmUpScheduler:
     def __init__(self, optimizer, cfg):
@@ -159,6 +160,9 @@ class AttentionMemoryTrainer(pl.LightningModule):
         self.validation_fvd_model = [FrechetVideoDistance()] if "fvd" in self.metrics else None
 
     def _build_buffer(self):
+        global_nan_number = torch.tensor(0, dtype=torch.float)
+        self.register_buffer("global_nan_number", global_nan_number)
+        
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
 
         betas = sigmoid_beta_schedule(self.timesteps).float()
@@ -263,16 +267,25 @@ class AttentionMemoryTrainer(pl.LightningModule):
             external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
-        assert torch.isnan(model_pred).sum() == 0, "model prediction contains NaN."
-
-        loss = F.mse_loss(model_pred, xs.detach(), reduction="none")
-        loss_weight = self.compute_loss_weights(noise_levels)
-        loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
-        loss = loss * loss_weight
-        loss = self.reweight_loss(loss, masks)
-
+        nan_number = torch.isnan(model_pred).sum()
+        dist.all_reduce(nan_number, op=dist.ReduceOp.SUM)
+        if nan_number != 0:
+            loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
+            self.global_nan_number += 1
+            self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
+            output_dict = {
+                "loss": torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device),
+            }
+            return output_dict
+        else:
+            loss = F.mse_loss(model_pred, xs.detach(), reduction="none")
+            loss_weight = self.compute_loss_weights(noise_levels)
+            loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
+            loss = loss * loss_weight
+            loss = self.reweight_loss(loss, masks)
+        
         # log the loss
-        self.log("training/loss", loss, prog_bar=True)
+        self.log("training/loss", loss, sync_dist=True, prog_bar=True)
 
         xs_gt = self._unnormalize_x(xs_gt)
         model_pred = self.vae_decode(model_pred)
