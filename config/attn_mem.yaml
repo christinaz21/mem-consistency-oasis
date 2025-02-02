@@ -27,7 +27,7 @@ experiment:
     strategy: ddp
     batch_size: 8
     checkpointing:
-      every_n_train_steps: 10000
+      every_n_train_steps: 6000
   validation:
     precision: bf16-mixed
     strategy: ddp

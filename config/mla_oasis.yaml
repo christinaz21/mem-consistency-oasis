@@ -32,9 +32,10 @@ experiment:
     strategy: ddp
     batch_size: 4
     limit_batch: 1
-    val_every_n_step: 3000
+    val_every_n_step: 6000
   
 algorithm:
+  save_video_every_n_step: 3000
   warmup_steps: 6000
   
 dataset:

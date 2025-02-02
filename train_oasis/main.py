@@ -11,7 +11,8 @@ import sys
 import os
 dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(dir_path)
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+os.environ["TMPDIR"] = "/data/taiye/Project/train-oasis/tmp"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
 
 from pathlib import Path
 
@@ -131,8 +132,8 @@ def run_local(cfg: DictConfig):
 
 @hydra.main(
     version_base=None,
-    config_path="/data/taiye/Project/open-oasis/config",
-    config_name="open_sora.yaml",
+    config_path="/data/taiye/Project/train-oasis/config",
+    config_name="mla_oasis.yaml",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:

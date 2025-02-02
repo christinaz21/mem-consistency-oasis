@@ -19,6 +19,7 @@ from .blocks import (
     FinalLayer,
     TimestepEmbedder,
 )
+from torch.utils.checkpoint import checkpoint
 
 class SpatioTemporalDiTBlock(nn.Module):
     def __init__(
@@ -101,6 +102,7 @@ class DiT(nn.Module):
         mlp_ratio=4.0,
         external_cond_dim=25,
         max_frames=32,
+        gradient_checkpointing=False,
         dtype=torch.float32,
     ):
         super().__init__()
@@ -109,6 +111,7 @@ class DiT(nn.Module):
         self.patch_size = patch_size
         self.num_heads = num_heads
         self.max_frames = max_frames
+        self.gradient_checkpointing = gradient_checkpointing
         self.dtype = dtype
 
         self.x_embedder = PatchEmbed(input_h, input_w, patch_size, in_channels, hidden_size, flatten=False)
@@ -204,8 +207,14 @@ class DiT(nn.Module):
         if torch.is_tensor(external_cond):
             c += self.external_cond(external_cond)
         for block in self.blocks:
-            x = block(x, c)  # (N, T, H, W, D)
-        x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
+            if self.gradient_checkpointing and self.training:
+                x = checkpoint(block, x, c, use_reentrant=False)
+            else:
+                x = block(x, c)  # (N, T, H, W, D)
+        if self.gradient_checkpointing and self.training:
+            x = checkpoint(self.final_layer, x, c, use_reentrant=False)
+        else:
+            x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
         # unpatchify
         x = rearrange(x, "b t h w d -> (b t) h w d")
         x = self.unpatchify(x)  # (N, out_channels, H, W)

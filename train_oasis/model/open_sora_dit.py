@@ -28,6 +28,7 @@ from .blocks import (
     FinalLayer,
     TimestepEmbedder,
 )
+from torch.utils.checkpoint import checkpoint
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0, scale=1.0, base_size=None):
     """
@@ -145,6 +146,7 @@ class DiT(nn.Module):
         dtype=torch.float32,
         enable_layernorm_kernel=False,
         use_causal_mask=False,
+        gradient_checkpointing=False,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -152,6 +154,7 @@ class DiT(nn.Module):
         self.patch_size = patch_size
         self.num_heads = num_heads
         self.max_frames = max_frames
+        self.gradient_checkpointing = gradient_checkpointing
         self.dtype = dtype
         self.hidden_size = hidden_size
         self.input_size = (max_frames, input_h, input_w)
@@ -269,8 +272,14 @@ class DiT(nn.Module):
         if torch.is_tensor(external_cond):
             c += self.external_cond(external_cond)
         for block in self.blocks:
-            x = block(x, c)
-        x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
+            if self.gradient_checkpointing and self.training:
+                x = checkpoint(block, x, c, use_reentrant=False)
+            else:
+                x = block(x, c)
+        if self.gradient_checkpointing and self.training:
+            x = checkpoint(self.final_layer, x, c, use_reentrant=False)
+        else:
+            x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
         # unpatchify
         x = rearrange(x, "b t h w d -> (b t) h w d")
         x = self.unpatchify(x)  # (N, out_channels, H, W)

@@ -94,6 +94,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 mlp_ratio=self.model_cfg.mlp_ratio,
                 external_cond_dim=self.external_cond_dim,
                 max_frames=self.cfg.n_frames,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
         elif self.model_cfg._name == "open_sora_dit":
@@ -110,6 +111,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 external_cond_dim=self.external_cond_dim,
                 max_frames=self.cfg.n_frames,
                 use_causal_mask=self.model_cfg.use_causal_mask,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
         elif self.model_cfg._name == "mla_dit":

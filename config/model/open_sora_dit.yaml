@@ -7,3 +7,4 @@ depth: 28
 num_heads: 16
 mlp_ratio: 4.0
 use_causal_mask: false
+gradient_checkpointing: true

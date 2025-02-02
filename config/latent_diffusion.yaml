@@ -19,13 +19,13 @@ load: null # wandb run id containing checkpoint or a path to a checkpoint file
 name: latent_diffusion
 
 experiment:
-  model_ckpt: outputs/2025-01-03/04-51-38/checkpoints/epoch=4-step=90000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed
     devices: auto
-    strategy: deepspeed
-    batch_size: 16
+    strategy: ddp
+    batch_size: 32
     checkpointing:
       every_n_train_steps: 10000
   validation:
@@ -33,9 +33,10 @@ experiment:
     strategy: ddp
     batch_size: 4
     limit_batch: 1
-    val_every_n_step: 3000
+    val_every_n_step: 6000
   
 algorithm:
+  save_video_every_n_step: 3000
   warmup_steps: 6000
   
 dataset:

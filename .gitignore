@@ -1,6 +1,7 @@
 /models
 data
 outputs
+/tmp
 
 __pycache__/
 *.out
