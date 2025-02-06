@@ -1,4 +1,5 @@
 from train_oasis.dataset.minerl import MinerlDataset
+from train_oasis.dataset.minerl_fast import MinerlFastDataset
 from train_oasis.dataset.minecraftvideo import MinecraftVideoDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
@@ -35,6 +36,7 @@ class VideoPredictionExperiment:
         # video datasets
         video_minecraft=MinecraftVideoDataset,
         minerl=MinerlDataset,
+        minerl_fast=MinerlFastDataset,
     )
 
     def __init__(
@@ -101,13 +103,17 @@ class VideoPredictionExperiment:
         shuffle = (
             False if isinstance(train_dataset, torch.utils.data.IterableDataset) else self.cfg.training.data.shuffle
         )
+        if shuffle:
+            print("Shuffling data")
+        else:
+            print("Not shuffling data")
         if train_dataset:
             return torch.utils.data.DataLoader(
                 train_dataset,
                 batch_size=self.cfg.training.batch_size,
                 num_workers=min(os.cpu_count(), self.cfg.training.data.num_workers),
                 shuffle=shuffle,
-                persistent_workers=True,
+                persistent_workers=True if self.cfg.training.data.num_workers > 0 else False,
                 drop_last=True,
                 pin_memory=True,
                 # prefetch_factor=8, # pre-load 8 * 32 data points, equal to 32 batch
@@ -128,7 +134,7 @@ class VideoPredictionExperiment:
                 batch_size=self.cfg.validation.batch_size,
                 num_workers=min(os.cpu_count(), self.cfg.validation.data.num_workers),
                 shuffle=shuffle,
-                persistent_workers=True,
+                persistent_workers=True if self.cfg.validation.data.num_workers > 0 else False,
                 drop_last=True,
             )
         else:
@@ -143,7 +149,7 @@ class VideoPredictionExperiment:
                 batch_size=self.cfg.test.batch_size,
                 num_workers=min(os.cpu_count(), self.cfg.test.data.num_workers),
                 shuffle=shuffle,
-                persistent_workers=True,
+                persistent_workers=True if self.cfg.test.data.num_workers > 0 else False,
             )
         else:
             return None

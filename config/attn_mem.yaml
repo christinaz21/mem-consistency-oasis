@@ -1,7 +1,7 @@
 # configuration parsing starts here
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: minerl # dataset yaml file name in configurations/dataset folder [fixme]
+  - dataset: minerl_fast # dataset yaml file name in configurations/dataset folder [fixme]
   - algorithm: attn_mem_video # algorithm yaml file name in configurations/algorithm folder [fixme]
   - model: attn_mem_dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
@@ -24,7 +24,7 @@ experiment:
   training:
     precision: bf16-mixed
     devices: auto
-    strategy: ddp
+    strategy: deepspeed
     batch_size: 8
     checkpointing:
       every_n_train_steps: 6000

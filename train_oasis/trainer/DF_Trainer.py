@@ -282,8 +282,8 @@ class DiffusionForcingVideo(pl.LightningModule):
         }
         if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger:
             log_video(
-                output_dict["xs_pred"],
-                output_dict["xs"],
+                output_dict["xs_pred"][:, :8],
+                output_dict["xs"][:, :8],
                 step=self.global_step,
                 namespace="training_vis",
                 logger=self.logger.experiment,

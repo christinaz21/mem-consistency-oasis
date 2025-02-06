@@ -522,6 +522,7 @@ class DiT(nn.Module):
             )
             chunk = torch.randn((B, end - last_end, *x.shape[-3:]), device=x.device) # (B, T, C, H, W)
             chunk = torch.clamp(chunk, -self.clip_noise, +self.clip_noise)
+            chunk = chunk.type_as(x)
             x_slice = x[:, start:]
             x_slice = torch.cat([x_slice, chunk], dim=1)
             if torch.is_tensor(external_cond):
