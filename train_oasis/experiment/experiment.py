@@ -1,6 +1,7 @@
 from train_oasis.dataset.minerl import MinerlDataset
 from train_oasis.dataset.minerl_fast import MinerlFastDataset
 from train_oasis.dataset.minecraftvideo import MinecraftVideoDataset
+from train_oasis.dataset.flappy_bird_fast import FlappyBirdFastDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
 
@@ -37,6 +38,7 @@ class VideoPredictionExperiment:
         video_minecraft=MinecraftVideoDataset,
         minerl=MinerlDataset,
         minerl_fast=MinerlFastDataset,
+        flappy_bird_fast=FlappyBirdFastDataset,
     )
 
     def __init__(

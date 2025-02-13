@@ -34,8 +34,11 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
-        if self.cfg.vae_ckpt:
+        if self.cfg.vae_name == "oasis":
             self.x_shape = [16, 18, 32]
+        elif self.cfg.vae_name == "flappy_bird":
+            self.x_shape = [4, 64, 36]
+        self.vae_name = cfg.vae_name
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
@@ -82,7 +85,7 @@ class DiffusionForcingVideo(pl.LightningModule):
 
 
     def _build_model(self, model_ckpt):
-        if self.model_cfg._name == "dit" or self.model_cfg._name == "dit_small":
+        if self.model_cfg._name == "dit" or self.model_cfg._name == "dit_small" or self.model_cfg._name == "flappy_bird_dit":
             from train_oasis.model.dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,
@@ -140,7 +143,7 @@ class DiffusionForcingVideo(pl.LightningModule):
             state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
             self.diffusion_model.load_state_dict(state_dict, strict=True)
         
-        if self.cfg.vae_ckpt:
+        if self.cfg.vae_name == "oasis":
             from train_oasis.model.vae import AutoencoderKL
             from safetensors.torch import load_model
             self.vae = AutoencoderKL(
@@ -155,7 +158,13 @@ class DiffusionForcingVideo(pl.LightningModule):
                 input_height=360,
                 input_width=640,
             )
+            assert self.cfg.vae_ckpt, "VAE checkpoint is required for oasis VAE."
             load_model(self.vae, self.cfg.vae_ckpt)
+            self.vae.eval()
+        elif self.cfg.vae_name == "flappy_bird":
+            assert self.cfg.vae_ckpt is None
+            from diffusers.models import AutoencoderKL
+            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema")
             self.vae.eval()
         else:
             self.vae = None
@@ -517,22 +526,40 @@ class DiffusionForcingVideo(pl.LightningModule):
     def vae_encode(self, x):
         if not self.vae:
             return x
-        batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
-        x = rearrange(x, "b t ... -> (b t) ...")
-        x = self.vae.encode(x).mean * self.scaling_factor
-        x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
-        return x
+        elif self.vae_name == "oasis":
+            batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
+            x = rearrange(x, "b t ... -> (b t) ...")
+            x = self.vae.encode(x).mean * self.scaling_factor
+            x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
+            return x
+        elif self.vae_name == "flappy_bird":
+            batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
+            x = rearrange(x, "b t ... -> (b t) ...")
+            x = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
+            x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
+            return x
+        else:
+            raise ValueError(f"Unsupported VAE {self.vae_name}.")
     
     @torch.no_grad()
     def vae_decode(self, x):
         # input: (b, t, c, h, w)
         if not self.vae:
             return x
-        batch_size, n_frames, c, h, w = x.shape
-        x = rearrange(x, "b t c h w -> (b t) (h w) c")
-        x = self.vae.decode(x / self.scaling_factor)
-        x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
-        return x
+        elif self.vae_name == "oasis":
+            batch_size, n_frames, c, h, w = x.shape
+            x = rearrange(x, "b t c h w -> (b t) (h w) c")
+            x = self.vae.decode(x / self.scaling_factor)
+            x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
+            return x
+        elif self.vae_name == "flappy_bird":
+            batch_size, n_frames, c, h, w = x.shape
+            x = rearrange(x, "b t ... -> (b t) ...")
+            x = self.vae.decode(x / self.vae.config.scaling_factor).sample
+            x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
+            return x
+        else:
+            raise ValueError(f"Unsupported VAE {self.vae_name}.")
 
     def _preprocess_batch(self, batch):
         xs = batch[0]

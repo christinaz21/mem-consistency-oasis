@@ -654,6 +654,14 @@ def load_attn_mem_from_yaml(yaml_path):
         attn_mem = yaml.safe_load(f)
     return attn_mem
 
+def parse_flappy_bird_action(act:int):
+    if act == 0:
+        return np.array([1, 0])
+    elif act == 1:
+        return np.array([0, 1])
+    else:
+        raise ValueError(f"Invalid action: {act}. Expected 0 or 1.")
+
 if __name__ == "__main__":
     # Test the function to load attention memory from yaml
     attn_mem = load_attn_mem_from_yaml("config/model/attn_mem_dit.yaml")
