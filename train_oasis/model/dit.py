@@ -257,8 +257,22 @@ def dit_cty():
         max_frames=10
     )
 
+def flappy_bird_dit():
+    return DiT(
+        input_h=64,
+        input_w=36,
+        in_channels=4,
+        patch_size=2,
+        hidden_size=512,
+        depth=8,
+        num_heads=16,
+        external_cond_dim=2,
+        max_frames=10
+    )
+
 DiT_models = {
     "DiT-S/2": DiT_S_2,
     "dit_small": dit_small,
-    "dit_cty": dit_cty
+    "dit_cty": dit_cty,
+    "flappy_bird_dit": flappy_bird_dit,
 }
