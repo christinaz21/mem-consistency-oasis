@@ -34,10 +34,10 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
-        if self.cfg.vae_name == "oasis":
-            self.x_shape = [16, 18, 32]
-        elif self.cfg.vae_name == "flappy_bird":
-            self.x_shape = [4, 64, 36]
+        # if self.cfg.vae_name == "oasis":
+        #     self.x_shape = [16, 18, 32]
+        # elif self.cfg.vae_name == "flappy_bird":
+        #     self.x_shape = [4, 64, 36]
         self.vae_name = cfg.vae_name
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
@@ -85,7 +85,7 @@ class DiffusionForcingVideo(pl.LightningModule):
 
 
     def _build_model(self, model_ckpt):
-        if self.model_cfg._name == "dit" or self.model_cfg._name == "dit_small" or self.model_cfg._name == "flappy_bird_dit":
+        if self.model_cfg.architecture == "oasis_dit":
             from train_oasis.model.dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,
@@ -101,7 +101,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
-        elif self.model_cfg._name == "open_sora_dit":
+        elif self.model_cfg.architecture == "sora_dit":
             from train_oasis.model.open_sora_dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,
@@ -118,7 +118,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
-        elif self.model_cfg._name == "mla_dit":
+        elif self.model_cfg.architecture == "mla_dit":
             from train_oasis.model.mla_dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,

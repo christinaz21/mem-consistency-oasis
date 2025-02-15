@@ -11,6 +11,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import pickle
 from fractions import Fraction
+from torchvision import transforms
 
 
 class FlappyBirdFastDataset(torch.utils.data.Dataset):
@@ -80,6 +81,13 @@ class FlappyBirdFastDataset(torch.utils.data.Dataset):
 
         self.total_len = np.array(self.total_len)
         self.total_cum = np.cumsum(self.total_len)
+
+        if cfg.reduce_reso_rate > 1:
+            self.transform = transforms.Resize(
+                (self.h // cfg.reduce_reso_rate, self.w // cfg.reduce_reso_rate), antialias=True
+            )
+        else:
+            self.transform = lambda x: x
 
     def __len__(self):
         return self.total_len.sum()
@@ -163,6 +171,7 @@ class FlappyBirdFastDataset(torch.utils.data.Dataset):
 
         nonterminal = np.ones(self.n_frames)
         video = torch.from_numpy(video / 255.0).float().permute(0, 3, 1, 2).contiguous()
+        video = self.transform(video)
         # print(start, end, video.shape, frame_idx, self.n_frames)
         assert video.shape[0] == self.n_frames, f"video.shape[0]={video.shape[0]} != self.n_frames"
 

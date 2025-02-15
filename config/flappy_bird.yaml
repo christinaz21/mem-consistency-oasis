@@ -25,19 +25,23 @@ experiment:
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 8
+    batch_size: 16
     checkpointing:
-      every_n_train_steps: 12000
+      every_n_train_steps: 6000
   validation:
     precision: bf16-mixed
-    strategy: ddp
+    strategy: deepspeed
     batch_size: 4
     limit_batch: 1
-    val_every_n_step: 6000
-  
+    val_every_n_step: 3000
+
+dataset:
+  validation_multiplier: 8
+  n_frames: 20
+
 algorithm:
-  save_video_every_n_step: 6000
-  warmup_steps: 12000
+  save_video_every_n_step: 3000
+  warmup_steps: 6000
   vae_name: flappy_bird
   vae_ckpt: null
 

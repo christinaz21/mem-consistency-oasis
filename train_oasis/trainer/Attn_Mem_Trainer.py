@@ -158,7 +158,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
         self.validation_fvd_model = [FrechetVideoDistance()] if "fvd" in self.metrics else None
 
     def _build_buffer(self):
-        global_nan_number = torch.tensor(0, dtype=torch.float)
+        global_nan_number = torch.tensor(0, dtype=torch.int32)
         self.register_buffer("global_nan_number", global_nan_number)
         
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
@@ -270,7 +270,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
         if nan_number != 0:
             loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
             self.global_nan_number += 1
-            self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
+            self.log("training/nan", self.global_nan_number, prog_bar=True)
             output_dict = {
                 "loss": loss,
             }

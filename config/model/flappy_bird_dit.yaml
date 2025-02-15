@@ -1,9 +1,11 @@
-input_h: 64
-input_w: 36
+architecture: oasis_dit
+input_h: &h 32
+input_w: &w 18
 patch_size: 2
-in_channels: 4
+in_channels: &c 4
 hidden_size: 512
 depth: 8
 num_heads: 16
 mlp_ratio: 4.0
 gradient_checkpointing: true
+observation_shape: [*c, *h, *w]

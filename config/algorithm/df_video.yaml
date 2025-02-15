@@ -2,7 +2,7 @@ debug: ${debug} # inherited from configurations/config.yaml
 lr: ${experiment.training.lr}
 
 # dataset-dependent configurations
-x_shape: ${dataset.observation_shape}
+x_shape: ${model.observation_shape}
 data_mean: ${dataset.data_mean}
 data_std: ${dataset.data_std}
 external_cond_dim: ${dataset.external_cond_dim}

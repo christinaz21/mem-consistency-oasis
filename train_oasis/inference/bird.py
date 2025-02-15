@@ -24,6 +24,7 @@ from pathlib import Path
 from train_oasis.utils import parse_flappy_bird_action
 import numpy as np
 import pickle
+from torchvision import transforms
 
 assert torch.cuda.is_available()
 device = torch.device("cuda:5")
@@ -79,7 +80,13 @@ def main(args):
         prompt = prompt[args.video_offset:]
     prompt = prompt[:n_prompt_frames]
     prompt = prompt.float() / 255.0
-    x = rearrange(prompt, "t h w c -> 1 t c h w")
+    prompt = rearrange(prompt, "t h w c -> t c h w")
+    if args.reduce_reso_rate > 1:
+        transform = transforms.Resize(
+            (prompt.shape[2] // args.reduce_reso_rate, prompt.shape[3] // args.reduce_reso_rate), antialias=True
+        )
+        prompt = transform(prompt)
+    x = rearrange(prompt, "t c h w -> 1 t c h w")
 
     print(x.shape)
     # get input action stream
@@ -271,20 +278,20 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-02-13/18-17-24/checkpoints/epoch=0-step=12000.ckpt",
+        default="outputs/2025-02-15/05-02-41/checkpoints/epoch=0-step=6000.ckpt",
     )
     parse.add_argument(
         "--inference-method",
         type=str,
         help="Inference method to use.",
         choices=["single", "gradient"],
-        default="single",
+        default="gradient",
     )
     parse.add_argument(
         "--model-name",
         type=str,
         help="Model name",
-        default="flappy_bird_dit",
+        default="flappy_bird_dit_half",
     )
     parse.add_argument(
         "--predict_v",
@@ -311,6 +318,12 @@ if __name__ == "__main__":
         default=None,
     )
     parse.add_argument(
+        "--reduce-reso-rate",
+        type=int,
+        help="Reduce resolution rate.",
+        default=2,
+    )
+    parse.add_argument(
         "--n-prompt-frames",
         type=int,
         help="If the prompt is a video, how many frames to condition on.",
@@ -320,7 +333,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/bird.mp4",
+        default="outputs/video/bird-fast-zero.mp4",
     )
     parse.add_argument(
         "--fps",

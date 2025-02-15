@@ -3,7 +3,7 @@ lr: ${experiment.training.lr}
 mem_beta_lr: 3e-3
 
 # dataset-dependent configurations
-x_shape: ${dataset.observation_shape}
+x_shape: ${model.observation_shape}
 data_mean: ${dataset.data_mean}
 data_std: ${dataset.data_std}
 external_cond_dim: ${dataset.external_cond_dim}
@@ -23,7 +23,7 @@ optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
 gradient_checkpointing: true
 
-save_video_every_n_step: 1000 # save a video every n train steps
+save_video_every_n_step: 3000 # save a video every n train steps
 
 diffusion:
 # training
