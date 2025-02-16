@@ -57,6 +57,7 @@ def main(args):
         model.load_state_dict(state_dict, strict=True)
     else:
         raise ValueError(f"unsupported checkpoint format: {args.oasis_ckpt}")
+    model.max_frames = args.max_frames
     model = model.to(device).eval()
 
     # load VAE checkpoint
@@ -292,6 +293,12 @@ if __name__ == "__main__":
         type=str,
         help="Model name",
         default="flappy_bird_dit_half",
+    )
+    parse.add_argument(
+        "--max-frames",
+        type=int,
+        help="Max frames",
+        default=20,
     )
     parse.add_argument(
         "--predict_v",
