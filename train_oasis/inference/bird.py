@@ -32,6 +32,14 @@ device = torch.device("cuda:5")
 def main(args):
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
+    if args.dtype == "float16":
+        torch.set_default_dtype(torch.float16)
+        dtype = torch.float16
+    elif args.dtype == "float32":
+        torch.set_default_dtype(torch.float32)
+        dtype = torch.float32
+    else:
+        raise ValueError(f"unsupported dtype: {args.dtype}")
 
     # load DiT checkpoint
     model = DiT_models[args.model_name]()
@@ -62,7 +70,7 @@ def main(args):
 
     # load VAE checkpoint
     vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema")
-    vae = vae.to(device).eval()
+    vae = vae.to(device, dtype=dtype).eval()
 
     # sampling params
     n_prompt_frames = args.n_prompt_frames
@@ -70,7 +78,9 @@ def main(args):
     max_noise_level = 1000
     vae_batch_size = 32
     ddim_noise_steps = args.ddim_steps
-    noise_range = torch.linspace(-1, max_noise_level - 1, ddim_noise_steps + 1)
+    noise_range = torch.linspace(-1, max_noise_level - 1, ddim_noise_steps + 1, dtype=torch.long)
+    noise_range = torch.where(noise_range >= max_noise_level, max_noise_level - 1, noise_range)
+    assert (noise_range < max_noise_level).all(), f"noise range out of bound: {noise_range}"
     noise_abs_max = 6 # open oasis use 20
     stabilization_level = 15
 
@@ -88,6 +98,7 @@ def main(args):
         )
         prompt = transform(prompt)
     x = rearrange(prompt, "t c h w -> 1 t c h w")
+    x = x.to(dtype=dtype)
 
     print(x.shape)
     # get input action stream
@@ -117,7 +128,7 @@ def main(args):
     x = rearrange(x, "(b t) ... -> b t ...", b=B, t=n_prompt_frames)
 
     # get alphas
-    betas = sigmoid_beta_schedule(max_noise_level).float().to(device)
+    betas = sigmoid_beta_schedule(max_noise_level).float().to(device, dtype=dtype)
     alphas = 1.0 - betas
     alphas_cumprod = torch.cumprod(alphas, dim=0)
     alphas_cumprod = rearrange(alphas_cumprod, "T -> T 1 1 1")
@@ -127,6 +138,7 @@ def main(args):
         for i in tqdm(range(n_prompt_frames, total_frames)):
             chunk = torch.randn((B, 1, *x.shape[-3:]), device=device) # (B, 1, C, H, W)
             chunk = torch.clamp(chunk, -noise_abs_max, +noise_abs_max)
+            chunk = chunk.to(dtype=dtype)
             x = torch.cat([x, chunk], dim=1)
             start_frame = max(0, i + 1 - model.max_frames)
 
@@ -147,7 +159,8 @@ def main(args):
 
                 # get model predictions
                 with torch.no_grad():
-                    v = model(x_curr, t, actions[:, start_frame : i + 1])
+                    with autocast("cuda", dtype=dtype):
+                        v = model(x_curr, t, actions[:, start_frame : i + 1])
                 
                 if args.predict_v:
                     x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
@@ -166,7 +179,7 @@ def main(args):
         assert ddim_noise_steps % (model.max_frames-1) == 0, f"ddim_noise_steps must be divisible by {model.max_frames - 1}"
         ddim_one_step = ddim_noise_steps // (model.max_frames-1)
         # The first frame is stabilized, noise level for the last 9 frames
-        noise_level_matrix = torch.zeros((ddim_one_step + 1, (model.max_frames-1)), device=device)
+        noise_level_matrix = torch.zeros((ddim_one_step + 1, (model.max_frames-1)), device=device, dtype=torch.long)
         for i in range(model.max_frames-1):
             for step in range(ddim_one_step+1):
                 noise_level_matrix[step, i] = noise_range[step + i*ddim_one_step]
@@ -184,6 +197,7 @@ def main(args):
         for i in range(n_prompt_frames, total_frames):
             chunk = torch.randn((B, 1, *x.shape[-3:]), device=device) # (B, 1, C, H, W)
             chunk = torch.clamp(chunk, -noise_abs_max, +noise_abs_max)
+            chunk = chunk.to(dtype=dtype)
             x = torch.cat([x, chunk], dim=1)
             # print(x[0][-1])
             start_frame = max(0, i + 1 - model.max_frames)
@@ -202,9 +216,8 @@ def main(args):
 
                 # get model predictions
                 with torch.no_grad():
-                    with autocast("cuda", dtype=torch.half):
+                    with autocast("cuda", dtype=dtype):
                         x_start = model(x_curr, t, actions[:, start_frame : i + 1])
-
                 x_noise = ((1 / alphas_cumprod[t]).sqrt() * x_curr - x_start) / (1 / alphas_cumprod[t] - 1).sqrt()
 
                 # get frame prediction
@@ -235,7 +248,7 @@ def main(args):
 
                 # get model predictions
                 with torch.no_grad():
-                    with autocast("cuda", dtype=torch.half):
+                    with autocast("cuda", dtype=dtype):
                         x_start = model(x_curr, t, actions[:, start_frame : i + 1])
 
                 x_noise = ((1 / alphas_cumprod[t]).sqrt() * x_curr - x_start) / (1 / alphas_cumprod[t] - 1).sqrt()
@@ -279,14 +292,14 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-02-15/05-02-41/checkpoints/epoch=0-step=6000.ckpt",
+        default="flappy_bird_dit/window_size=30-step=36000.bin",
     )
     parse.add_argument(
         "--inference-method",
         type=str,
         help="Inference method to use.",
         choices=["single", "gradient"],
-        default="gradient",
+        default="single",
     )
     parse.add_argument(
         "--model-name",
@@ -298,7 +311,7 @@ if __name__ == "__main__":
         "--max-frames",
         type=int,
         help="Max frames",
-        default=20,
+        default=30,
     )
     parse.add_argument(
         "--predict_v",
@@ -340,7 +353,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/bird-fast-zero.mp4",
+        default="outputs/video/bird-zero.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -348,7 +361,13 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=30,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=36)
+    parse.add_argument(
+        "--dtype",
+        type=str,
+        help="What dtype should be used for the model?",
+        default="float16",
+    )
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=29)
 
     args = parse.parse_args()
     print("inference args:")
