@@ -110,6 +110,8 @@ def main(args):
     actions = actions[:total_frames]
     actions = np.array(actions)
     actions = torch.from_numpy(actions).unsqueeze(0).to(x.dtype) # (1, T, 2)
+    actions = torch.zeros_like(actions)
+    actions[:, :, 1] = 1
     assert actions.shape[1] == total_frames, f"{actions.shape[1]} != {total_frames}"
     print(actions.shape)
     # sampling inputs
@@ -299,7 +301,7 @@ if __name__ == "__main__":
         type=str,
         help="Inference method to use.",
         choices=["single", "gradient"],
-        default="single",
+        default="gradient",
     )
     parse.add_argument(
         "--model-name",
@@ -353,7 +355,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/bird-zero.mp4",
+        default="outputs/video/bird-test.mp4",
     )
     parse.add_argument(
         "--fps",

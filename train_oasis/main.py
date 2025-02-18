@@ -133,7 +133,7 @@ def run_local(cfg: DictConfig):
 @hydra.main(
     version_base=None,
     config_path="/data/taiye/Project/train-oasis/config",
-    config_name="flappy_bird",
+    config_name="fb_attn_mem",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:

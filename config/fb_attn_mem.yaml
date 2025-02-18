@@ -2,8 +2,8 @@
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: flappy_bird_fast # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
-  - model: flappy_bird_dit # model yaml file name in configurations/model folder [fixme]
+  - algorithm: attn_mem_video # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: fb_attn_mem_dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
@@ -16,16 +16,17 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: flappy_bird
+name: fb_attn_mem
 
 experiment:
-  model_ckpt: null # path to a pre-trained diffusion checkpoint
+  model_ckpt: null
   tasks: [training]
   training:
+    lr: 2e-5
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 12
+    batch_size: 8
     checkpointing:
       every_n_train_steps: 6000
   validation:
@@ -33,17 +34,15 @@ experiment:
     strategy: deepspeed
     batch_size: 4
     limit_batch: 1
-    val_every_n_step: 3000
+    val_every_n_step: 6000
 
 dataset:
-  validation_multiplier: 4
-  n_frames: 30
+  n_frames: 32
+  context_length: 4
+  validation_multiplier: 2
 
 algorithm:
-  save_video_every_n_step: 3000
-  warmup_steps: 6000
+  gradient_checkpointing: true
+  mem_beta_lr: 1e-3
   vae_name: flappy_bird
   vae_ckpt: null
-
-model:
-  precision: bf16-mixed

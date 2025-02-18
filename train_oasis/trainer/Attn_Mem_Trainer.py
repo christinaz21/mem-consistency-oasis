@@ -51,8 +51,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
-        if self.cfg.vae_ckpt:
-            self.x_shape = [16, 18, 32]
+        self.vae_name = cfg.vae_name
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
@@ -102,37 +101,34 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
 
     def _build_model(self, model_ckpt):
-        if self.model_cfg._name == "attn_mem_dit":
-            from train_oasis.model.attn_mem_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.model_cfg.max_frames,
-                stride=self.model_cfg.stride,
-                stabilization_level=self.stabilization_level,
-                clip_noise=self.clip_noise,
-                timesteps=self.timesteps,
-                delta_update=self.model_cfg.delta_update,
-                bptt=self.model_cfg.bptt,
-                gradient_ckeckpointing=self.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        else:
-            raise ValueError(f"Unsupported model {self.model_cfg._name}.")
+        from train_oasis.model.attn_mem_dit import DiT
+        self.diffusion_model = DiT(
+            input_h=self.model_cfg.input_h,
+            input_w=self.model_cfg.input_w,
+            patch_size=self.model_cfg.patch_size,
+            in_channels=self.model_cfg.in_channels,
+            hidden_size=self.model_cfg.hidden_size,
+            depth=self.model_cfg.depth,
+            num_heads=self.model_cfg.num_heads,
+            mlp_ratio=self.model_cfg.mlp_ratio,
+            external_cond_dim=self.external_cond_dim,
+            max_frames=self.model_cfg.max_frames,
+            stride=self.model_cfg.stride,
+            stabilization_level=self.stabilization_level,
+            clip_noise=self.clip_noise,
+            timesteps=self.timesteps,
+            delta_update=self.model_cfg.delta_update,
+            bptt=self.model_cfg.bptt,
+            gradient_ckeckpointing=self.gradient_checkpointing,
+            dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+        )
         
         if model_ckpt:
             print(f"Loading Diffusion model from {model_ckpt}")
             state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
             self.diffusion_model.load_state_dict(state_dict, strict=True)
         
-        if self.cfg.vae_ckpt:
+        if self.cfg.vae_name == "oasis":
             from train_oasis.model.vae import AutoencoderKL
             from safetensors.torch import load_model
             self.vae = AutoencoderKL(
@@ -147,7 +143,13 @@ class AttentionMemoryTrainer(pl.LightningModule):
                 input_height=360,
                 input_width=640,
             )
+            assert self.cfg.vae_ckpt, "VAE checkpoint is required for oasis VAE."
             load_model(self.vae, self.cfg.vae_ckpt)
+            self.vae.eval()
+        elif self.cfg.vae_name == "flappy_bird":
+            assert self.cfg.vae_ckpt is None
+            from diffusers.models import AutoencoderKL
+            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema")
             self.vae.eval()
         else:
             self.vae = None
@@ -406,22 +408,40 @@ class AttentionMemoryTrainer(pl.LightningModule):
     def vae_encode(self, x):
         if not self.vae:
             return x
-        batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
-        x = rearrange(x, "b t ... -> (b t) ...")
-        x = self.vae.encode(x).mean * self.scaling_factor
-        x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
-        return x
+        elif self.vae_name == "oasis":
+            batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
+            x = rearrange(x, "b t ... -> (b t) ...")
+            x = self.vae.encode(x).mean * self.scaling_factor
+            x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
+            return x
+        elif self.vae_name == "flappy_bird":
+            batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
+            x = rearrange(x, "b t ... -> (b t) ...")
+            x = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
+            x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
+            return x
+        else:
+            raise ValueError(f"Unsupported VAE {self.vae_name}.")
     
     @torch.no_grad()
     def vae_decode(self, x):
         # input: (b, t, c, h, w)
         if not self.vae:
             return x
-        batch_size, n_frames, c, h, w = x.shape
-        x = rearrange(x, "b t c h w -> (b t) (h w) c")
-        x = self.vae.decode(x / self.scaling_factor)
-        x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
-        return x
+        elif self.vae_name == "oasis":
+            batch_size, n_frames, c, h, w = x.shape
+            x = rearrange(x, "b t c h w -> (b t) (h w) c")
+            x = self.vae.decode(x / self.scaling_factor)
+            x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
+            return x
+        elif self.vae_name == "flappy_bird":
+            batch_size, n_frames, c, h, w = x.shape
+            x = rearrange(x, "b t ... -> (b t) ...")
+            x = self.vae.decode(x / self.vae.config.scaling_factor).sample
+            x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
+            return x
+        else:
+            raise ValueError(f"Unsupported VAE {self.vae_name}.")
 
     def _preprocess_batch(self, batch):
         xs = batch[0]
