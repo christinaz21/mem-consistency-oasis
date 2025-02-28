@@ -6,6 +6,7 @@ import sys
 import os
 dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 sys.path.append(dir_path)
+os.environ["TMPDIR"] = "/data/taiye/Project/train-oasis/tmp"
 
 import torch
 from train_oasis.model.dit import DiT_models
@@ -27,7 +28,7 @@ import pickle
 from torchvision import transforms
 
 assert torch.cuda.is_available()
-device = torch.device("cuda:5")
+device = torch.device("cuda:0")
 
 def main(args):
     torch.manual_seed(0)
@@ -110,8 +111,6 @@ def main(args):
     actions = actions[:total_frames]
     actions = np.array(actions)
     actions = torch.from_numpy(actions).unsqueeze(0).to(x.dtype) # (1, T, 2)
-    actions = torch.zeros_like(actions)
-    actions[:, :, 1] = 1
     assert actions.shape[1] == total_frames, f"{actions.shape[1]} != {total_frames}"
     print(actions.shape)
     # sampling inputs
@@ -301,7 +300,7 @@ if __name__ == "__main__":
         type=str,
         help="Inference method to use.",
         choices=["single", "gradient"],
-        default="gradient",
+        default="single",
     )
     parse.add_argument(
         "--model-name",
@@ -313,7 +312,7 @@ if __name__ == "__main__":
         "--max-frames",
         type=int,
         help="Max frames",
-        default=30,
+        default=10,
     )
     parse.add_argument(
         "--predict_v",
@@ -355,7 +354,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/bird-test.mp4",
+        default="outputs/video/bird-window_size-30.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -369,7 +368,7 @@ if __name__ == "__main__":
         help="What dtype should be used for the model?",
         default="float16",
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=29)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=3)
 
     args = parse.parse_args()
     print("inference args:")

@@ -1,9 +1,9 @@
 # configuration parsing starts here
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: flappy_bird_fast # dataset yaml file name in configurations/dataset folder [fixme]
+  - dataset: minecraft_easy # dataset yaml file name in configurations/dataset folder [fixme]
   - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
-  - model: flappy_bird_dit # model yaml file name in configurations/model folder [fixme]
+  - model: dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
@@ -16,7 +16,7 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: flappy_bird
+name: latent_diffusion_easy
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -27,24 +27,17 @@ experiment:
     strategy: deepspeed
     batch_size: 32
     checkpointing:
-      every_n_train_steps: 6000
-      enable_version_counter: true
+      every_n_train_steps: 2000
   validation:
     precision: bf16-mixed
     strategy: deepspeed
-    batch_size: 4
+    batch_size: 8
     limit_batch: 1
-    val_every_n_step: 3000
-
-dataset:
-  validation_multiplier: 4
-  n_frames: 10
-
+    val_every_n_step: 2000
+  
 algorithm:
-  save_video_every_n_step: 3000
-  warmup_steps: 6000
-  vae_name: flappy_bird
-  vae_ckpt: null
+  save_video_every_n_step: 2000
+  warmup_steps: 1000
 
 model:
   precision: bf16-mixed

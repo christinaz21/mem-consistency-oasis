@@ -14,7 +14,7 @@ wandb:
   mode: offline # set wandb logging to online, offline or dryrun
 
 resume: null # wandb run id to resume logging and loading checkpoint from
-load: null # wandb run id containing checkpoint or a path to a checkpoint file
+load: outputs/2025-02-18/05-52-37/checkpoints/epoch=0-step=42000.ckpt # wandb run id containing checkpoint or a path to a checkpoint file
 
 name: fb_attn_mem
 
@@ -29,6 +29,8 @@ experiment:
     batch_size: 8
     checkpointing:
       every_n_train_steps: 6000
+    optim:
+      accumulate_grad_batches: 1
   validation:
     precision: bf16-mixed
     strategy: deepspeed
