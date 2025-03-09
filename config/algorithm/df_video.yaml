@@ -34,6 +34,7 @@ diffusion:
   # sampling
   sampling_timesteps: 40 # fixme, numer of diffusion steps, should be increased
   stabilization_level: 15
+  predict_v: true
 
 metrics:
   - nothing

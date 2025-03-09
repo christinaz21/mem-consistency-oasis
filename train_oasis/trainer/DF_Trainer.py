@@ -56,6 +56,7 @@ class DiffusionForcingVideo(pl.LightningModule):
 
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
+        self.predict_v = cfg.diffusion.predict_v
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -236,14 +237,29 @@ class DiffusionForcingVideo(pl.LightningModule):
 
         cum_snr = F.pad(cum_snr[:-1], (0, 0, 1, 0), value=0.0)
         clipped_fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (1 - normalized_clipped_snr)
-
-        return clipped_fused_snr * self.snr_clip
+        if self.predict_v:
+            fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (1 - normalized_snr)
+            return clipped_fused_snr * self.snr_clip / (fused_snr * self.snr_clip + 1)
+        else:
+            return clipped_fused_snr * self.snr_clip
 
     def q_sample(self, x_start, t, noise=None):
         # t random(0, timestep)
         return (
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
             + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
+        )
+
+    def predict_v_from_x(self, x_start, t, noise):
+        return (
+            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * noise
+            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
+        )
+    
+    def predict_start_from_v(self, x_t, t, v):
+        return (
+            extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t
+            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
         )
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
@@ -271,7 +287,11 @@ class DiffusionForcingVideo(pl.LightningModule):
             }
             return output_dict
         else:
-            loss = F.mse_loss(model_pred, xs.detach(), reduction="none")
+            if self.predict_v:
+                target = self.predict_v_from_x(xs, noise_levels, noise)
+            else:
+                target = xs
+            loss = F.mse_loss(model_pred, target.detach(), reduction="none")
             loss_weight = self.compute_loss_weights(noise_levels)
             loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
             loss = loss * loss_weight
@@ -280,19 +300,18 @@ class DiffusionForcingVideo(pl.LightningModule):
         # log the loss
         self.log("training/loss", loss, sync_dist=True, prog_bar=True)
 
-        xs_gt = self._unnormalize_x(xs_gt)
-        model_pred = self.vae_decode(model_pred)
-        model_pred = self._unnormalize_x(model_pred)
-
         output_dict = {
             "loss": loss,
-            "xs_pred": model_pred,
-            "xs": xs_gt,
         }
         if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger:
+            xs_gt = self._unnormalize_x(xs_gt)
+            if self.predict_v:
+                model_pred = self.predict_start_from_v(noised_x, noise_levels, model_pred)
+            model_pred = self.vae_decode(model_pred)
+            model_pred = self._unnormalize_x(model_pred)
             log_video(
-                output_dict["xs_pred"][:, :8],
-                output_dict["xs"][:, :8],
+                model_pred[:, :8],
+                xs_gt[:, :8],
                 step=self.global_step,
                 namespace="training_vis",
                 logger=self.logger.experiment,
@@ -428,8 +447,11 @@ class DiffusionForcingVideo(pl.LightningModule):
             external_cond=rearrange(external_cond, "t b ... -> b t ...") if external_cond is not None else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
-
-        x_start = model_pred
+        
+        if self.predict_v:
+            x_start = self.predict_start_from_v(x, clipped_curr_noise_level, model_pred)
+        else:
+            x_start = model_pred
         pred_noise = self.predict_noise_from_start(x, clipped_curr_noise_level, x_start)
 
         x_pred = x_start * alpha_next.sqrt() + pred_noise * c

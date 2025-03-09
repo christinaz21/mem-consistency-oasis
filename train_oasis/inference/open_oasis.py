@@ -172,13 +172,13 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-01-03/04-51-38/checkpoints/epoch=4-step=90000.ckpt",
+        default="outputs/2025-03-03/17-14-45/checkpoints/epoch=2-step=26000.ckpt",
     )
     parse.add_argument(
         "--model-name",
         type=str,
         help="Model name",
-        default="dit_cty",
+        default="dit_easy",
     )
     parse.add_argument(
         "--predict_v",
@@ -190,31 +190,31 @@ if __name__ == "__main__":
         "--window_size",
         type=int,
         help="Model window size.",
-        default=10,
+        default=20,
     )
     parse.add_argument(
         "--vae-ckpt",
         type=str,
         help="Path to Oasis ViT-VAE checkpoint.",
-        default="models/oasis500m/vit-l-20.safetensors",
+        default="models/vit/vit-l-20.safetensors",
     )
     parse.add_argument(
         "--num-frames",
         type=int,
         help="How many frames should the output be?",
-        default=1200,
+        default=600,
     )
     parse.add_argument(
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.mp4",
+        default="data/minecraft_easy/5/000021.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.jsonl",
+        default="data/minecraft_easy/5/000021.npz",
     )
     parse.add_argument(
         "--video-offset",
@@ -226,13 +226,13 @@ if __name__ == "__main__":
         "--n-prompt-frames",
         type=int,
         help="If the prompt is a video, how many frames to condition on.",
-        default=1,
+        default=5,
     )
     parse.add_argument(
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/long.mp4",
+        default="outputs/video/easy.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -240,7 +240,7 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=20,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=50)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=20)
 
     args = parse.parse_args()
     print("inference args:")

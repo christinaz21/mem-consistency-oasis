@@ -134,6 +134,10 @@ def load_actions(path, action_offset=None):
         actions = [parse_VPT_action(line) for line in lines]
         actions = np.array(actions)
         actions = torch.from_numpy(actions).float()
+    elif path.endswith(".npz"):
+        actions = np.load(path)["actions"]
+        actions = actions[1 : ]
+        actions = torch.from_numpy(actions).float()
     else:
         raise ValueError("unrecognized action file extension; expected '.jsonl', '*.actions.pt' or '*.one_hot_actions.pt'")
     if action_offset is not None:
