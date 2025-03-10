@@ -26,7 +26,7 @@ experiment:
     devices: auto
     strategy: deepspeed
     batch_size: 32
-    max_epochs: 3
+    max_epochs: 16
     checkpointing:
       every_n_train_steps: 2000
   validation:
@@ -35,11 +35,14 @@ experiment:
     batch_size: 8
     limit_batch: 1
     val_every_n_step: null
-    val_every_n_epoch: 5
+    val_every_n_epoch: 50
   
 algorithm:
   save_video_every_n_step: 2000
-  warmup_steps: 1000
+  warmup_steps: 500
 
 model:
   precision: bf16-mixed
+
+dataset:
+  train_limit: 64000

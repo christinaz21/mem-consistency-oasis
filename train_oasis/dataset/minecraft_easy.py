@@ -59,7 +59,10 @@ class MinecraftEasyDataset(torch.utils.data.Dataset):
         self.cum_clips_per_video = np.cumsum(self.clips_per_video)
 
     def __len__(self):
-        return self.clips_per_video.sum()
+        if self.cfg.train_limit is not None and self.split == "training":
+            return min(self.cfg.train_limit, self.clips_per_video.sum())
+        else:
+            return self.clips_per_video.sum()
 
     def get_data_paths(self):
         all_path = []

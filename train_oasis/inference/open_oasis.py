@@ -22,7 +22,7 @@ import os
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
-device = "cuda:0"
+device = "cuda:1"
 
 
 def main(args):
@@ -184,7 +184,7 @@ if __name__ == "__main__":
         "--predict_v",
         action="store_true",
         help="Whether the model use predict_v.",
-        default=False,
+        default=True,
     )
     parse.add_argument(
         "--window_size",
@@ -208,13 +208,13 @@ if __name__ == "__main__":
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/minecraft_easy/5/000021.mp4",
+        default="data/minecraft_easy/5/000038.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/minecraft_easy/5/000021.npz",
+        default="data/minecraft_easy/5/000038.npz",
     )
     parse.add_argument(
         "--video-offset",
@@ -232,7 +232,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/easy.mp4",
+        default="outputs/video/easy_predv_100.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -240,7 +240,7 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=20,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=20)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=100)
 
     args = parse.parse_args()
     print("inference args:")
