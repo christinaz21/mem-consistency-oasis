@@ -1,6 +1,8 @@
-import numpy as np
+import torch.nn.functional as F
+import torch
 
-path = "/data/taiye/Project/train-oasis/data/minecraft_easy/0/000000.npz"
-data = np.load(path)
-print(data["actions"])
-print(data["actions"].dtype)
+pred = torch.randn(3,)
+label = torch.ones(3,)
+
+pred = F.sigmoid(pred)
+print(F.binary_cross_entropy_with_logits(pred, label))

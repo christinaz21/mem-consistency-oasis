@@ -171,8 +171,9 @@ class FrechetVideoDistance(nn.Module):
         mu_real, sigma_real = self.compute_stats(feats_real)
 
         m = np.square(mu_gen - mu_real).sum()
+        mat = np.dot(sigma_gen, sigma_real)
         s, _ = scipy.linalg.sqrtm(
-            np.dot(sigma_gen, sigma_real), disp=False
+            mat, disp=False
         )  # pylint: disable=no-member
         fid = np.real(m + np.trace(sigma_gen + sigma_real - s * 2))
 
@@ -196,8 +197,8 @@ class FrechetVideoDistance(nn.Module):
         if n_frames < 2:
             raise ValueError("Video must have more than 1 frame for FVD")
 
-        videos_fake = videos_fake.permute(1, 2, 0, 3, 4).contiguous()
-        videos_real = videos_real.permute(1, 2, 0, 3, 4).contiguous()
+        videos_fake = videos_fake.permute(1, 2, 0, 3, 4)
+        videos_real = videos_real.permute(1, 2, 0, 3, 4)
 
         # detector takes in tensors of shape [batch_size, c, video_len, h, w] with range -1 to 1
         feats_fake = self.detector(videos_fake, **self.detector_kwargs).cpu().numpy()
@@ -230,6 +231,8 @@ def get_validation_metrics_for_videos(
     :return: a tuple of metrics
     """
     frame, batch, channel, height, width = observation_hat.shape
+    observation_gt = observation_gt.contiguous()
+    observation_hat = observation_hat.contiguous()
     output_dict = {}
     observation_gt = observation_gt.type_as(observation_hat)  # some metrics don't fully support fp16
 
@@ -666,7 +669,53 @@ def parse_flappy_bird_action(act:int):
     else:
         raise ValueError(f"Invalid action: {act}. Expected 0 or 1.")
 
+def test_vae():
+    import sys
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    sys.path.append(dir_path)
+    from train_oasis.model.vae import VAE_models
+    from safetensors.torch import load_model
+    from torch import autocast
+    device = "cuda"
+    vae_path = "models/vit/vit-l-20.safetensors"
+    vae = VAE_models["vit-l-20-shallow-encoder"]()
+    load_model(vae, vae_path)
+    vae = vae.to(device).eval()
+    scaling_factor = 0.07843137255
+
+    video_paths = ["data/minecraft_easy/0/000000.mp4"]
+
+    fid_model = FrechetInceptionDistance(feature=64)
+    lpips_model = LearnedPerceptualImagePatchSimilarity()
+    fvd_model = FrechetVideoDistance()
+
+    for video_path in video_paths:
+        prompt = read_video(video_path, pts_unit="sec")[0].to(device)
+        prompt = rearrange(prompt, "t h w c -> t c h w")
+        T, C, H, W = prompt.shape
+        prompt = prompt.float() / 255.0
+        with torch.no_grad():
+            with autocast("cuda", dtype=torch.float):
+                latent = vae.encode(prompt * 2 - 1).mean * scaling_factor
+        # latent = rearrange(latent, "t (h w) c -> t c h w", t=T, h=H // vae.patch_size, w=W // vae.patch_size)
+
+        with torch.no_grad():
+            with autocast("cuda", dtype=torch.float):
+                obs = (vae.decode(latent / scaling_factor) + 1) / 2
+
+        obs = obs * 2 - 1
+        prompt = prompt * 2 - 1
+        
+        output_dict = get_validation_metrics_for_videos(
+            obs.unsqueeze(1).cpu(),
+            prompt.unsqueeze(1).cpu(),
+            lpips_model=lpips_model,
+            fid_model=fid_model,
+            fvd_model=None# fvd_model,
+        )
+        print(output_dict)
+
+
 if __name__ == "__main__":
-    # Test the function to load attention memory from yaml
-    attn_mem = load_attn_mem_from_yaml("config/model/attn_mem_dit.yaml")
-    print(attn_mem)
+    test_vae()

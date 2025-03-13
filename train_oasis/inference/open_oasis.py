@@ -22,7 +22,7 @@ import os
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
-device = "cuda:1"
+device = "cuda:0"
 
 
 def main(args):
@@ -83,6 +83,10 @@ def main(args):
     print(x.shape)
     # get input action stream
     actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames]
+    if actions.shape[1] < total_frames:
+        copy_actions_list = [actions for _ in range(total_frames // actions.shape[1] + 1)]
+        actions = torch.cat(copy_actions_list, dim=1)
+        actions = actions[:, :total_frames]
     assert actions.shape[1] == total_frames, f"{actions.shape[1]} != {total_frames}"
     print(actions.shape)
     # sampling inputs
@@ -154,14 +158,21 @@ def main(args):
 
     # vae decoding
     x = rearrange(x, "b t c h w -> (b t) (h w) c")
+    vae_batch_size = 128
     with torch.no_grad():
-        x = (vae.decode(x / scaling_factor) + 1) / 2
+        all_frames = []
+        for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
+            x_clip = x[idx:idx + vae_batch_size]
+            x_clip = (vae.decode(x_clip / scaling_factor) + 1) / 2
+            all_frames.append(x_clip)
+        x = torch.cat(all_frames, dim=0)
     x = rearrange(x, "(b t) c h w -> b t h w c", t=total_frames)
 
     # save video
+    x = x[0].cpu()
     x = torch.clamp(x, 0, 1)
     x = (x * 255).byte()
-    write_video(args.output_path, x[0].cpu(), fps=args.fps)
+    write_video(args.output_path, x, fps=args.fps)
     print(f"generation saved to {args.output_path}.")
 
 
@@ -202,19 +213,19 @@ if __name__ == "__main__":
         "--num-frames",
         type=int,
         help="How many frames should the output be?",
-        default=600,
+        default=6000,
     )
     parse.add_argument(
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/minecraft_easy/5/000038.mp4",
+        default="data/minecraft_easy/5/000019.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/minecraft_easy/5/000038.npz",
+        default="data/minecraft_easy/5/000019.npz",
     )
     parse.add_argument(
         "--video-offset",
@@ -232,7 +243,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/easy_predv_100.mp4",
+        default="outputs/video/easy_predv_20_6000.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -240,7 +251,7 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=20,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=100)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=20)
 
     args = parse.parse_args()
     print("inference args:")

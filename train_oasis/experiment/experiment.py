@@ -5,6 +5,8 @@ from train_oasis.dataset.flappy_bird_fast import FlappyBirdFastDataset
 from train_oasis.dataset.minecraft_easy import MinecraftEasyDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
+from train_oasis.trainer.Image_Discriminator_Trainer import ImageDiscriminatorTrainer
+from train_oasis.trainer.DF_GAN_Trainer import DFGANVideo
 
 from typing import Optional, Union
 import pathlib
@@ -32,6 +34,8 @@ class VideoPredictionExperiment:
     compatible_algorithms = dict(
         df_video=DiffusionForcingVideo,
         attn_mem_video=AttentionMemoryTrainer,
+        img_dis=ImageDiscriminatorTrainer,
+        df_gan=DFGANVideo,
     )
 
     compatible_datasets = dict(

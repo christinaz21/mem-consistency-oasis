@@ -133,7 +133,7 @@ def run_local(cfg: DictConfig):
 @hydra.main(
     version_base=None,
     config_path="/data/taiye/Project/train-oasis/config",
-    config_name="latent_diffusion_easy",
+    config_name="apt",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:
