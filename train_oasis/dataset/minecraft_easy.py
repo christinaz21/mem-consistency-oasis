@@ -102,7 +102,8 @@ class MinecraftEasyDataset(torch.utils.data.Dataset):
         try:
             return self.getitem(idx)
         except Exception as e:
-            return self.getitem(random.randint(0, self.__len__() - 1))
+            print(f"Error processing index {idx}: {e}")
+            return self.__getitem__(random.randint(0, self.__len__() - 1))
 
     def getitem(self, idx):
         file_idx, frame_idx = self.split_idx(idx)
@@ -118,7 +119,8 @@ class MinecraftEasyDataset(torch.utils.data.Dataset):
             assert actions.shape == (self.n_frames, self.external_cond_dim), f"actions.shape={actions.shape} != (self.n_frames - 1, self.external_cond_dim), file_idx={file_idx}, frame_idx={frame_idx}"
 
         nonterminal = np.ones(self.n_frames)
-        video = torch.from_numpy(video / 255.0).float().permute(0, 3, 1, 2).contiguous()
+        video = torch.from_numpy(video).float() / 255.0
+        video = video.permute(0, 3, 1, 2).contiguous()
         # print(start, end, video.shape, frame_idx, self.n_frames)
         assert video.shape[0] == self.n_frames, f"video.shape[0]={video.shape[0]} != self.n_frames"
 

@@ -28,10 +28,12 @@ import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 import torch.distributed as dist
 from train_oasis.model.video_discriminator import VideoDiscriminator
+from torch.nn.utils import clip_grad_value_
 
 class DFGANVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
+        self.automatic_optimization = False
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
@@ -59,9 +61,8 @@ class DFGANVideo(pl.LightningModule):
         self.scaling_factor = cfg.scaling_factor
         self.predict_v = cfg.diffusion.predict_v
 
-        self.dis_loss_coeff = cfg.dis_loss_coeff
-        self.gen_loss_coeff = cfg.gen_loss_coeff
         self.mse_loss_coeff = cfg.mse_loss_coeff
+        self.gradient_clip_val = cfg.gradient_clip_val
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -207,19 +208,26 @@ class DFGANVideo(pl.LightningModule):
         register_buffer("clipped_snr", clipped_snr)
 
     def configure_optimizers(self):
-        params = tuple(self.diffusion_model.parameters()) + tuple(self.discriminator.parameters())
         if self.cfg.strategy == "ddp":
-            optimizer_dynamics = torch.optim.AdamW(
-                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            opt_d = torch.optim.AdamW(
+                tuple(self.discriminator.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
-            return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
+            opt_g = torch.optim.AdamW(
+                tuple(self.diffusion_model.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            )
+            scheduler_d = WarmUpScheduler(opt_d, self.cfg)
+            scheduler_g = WarmUpScheduler(opt_g, self.cfg)
+            return [opt_d, opt_g], [{"scheduler": scheduler_d, "interval": "step"}, {"scheduler": scheduler_g, "interval": "step"}]
         elif self.cfg.strategy == "deepspeed":
-            optimizer_dynamics = DeepSpeedCPUAdam(
-                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            opt_d = DeepSpeedCPUAdam(
+                tuple(self.discriminator.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
-            return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
+            opt_g = DeepSpeedCPUAdam(
+                tuple(self.diffusion_model.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            )
+            scheduler_d = WarmUpScheduler(opt_d, self.cfg)
+            scheduler_g = WarmUpScheduler(opt_g, self.cfg)
+            return [opt_d, opt_g], [{"scheduler": scheduler_d, "interval": "step"}, {"scheduler": scheduler_g, "interval": "step"}]
         else:
             raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
 
@@ -313,30 +321,39 @@ class DFGANVideo(pl.LightningModule):
         else:
             xs_pred = model_pred
 
+        opt_d, opt_g = self.optimizers()
         negative_video = rearrange(xs_pred, "t b ... -> b t ...")
         positive_video = rearrange(xs, "t b ... -> b t ...")
 
-        all_videos = torch.cat([positive_video, negative_video], 0)
+        all_videos = torch.cat([positive_video, negative_video.detach()], 0)
         all_conditions = torch.cat([rearrange(conditions, "t b ... -> b t ..."), rearrange(conditions, "t b ... -> b t ...")], 0) if conditions is not None else None
         all_labels = torch.cat([torch.ones(positive_video.shape[0]), torch.zeros(negative_video.shape[0])], 0).to(self.device)
         all_pred = self.discriminator(all_videos, all_conditions)
         dis_gan_loss = F.binary_cross_entropy_with_logits(all_pred, all_labels)
-        neg_pred = all_pred[positive_video.shape[0]:]
+        opt_d.zero_grad()
+        dis_gan_loss.backward()
+        clip_grad_value_(self.discriminator.parameters(), self.gradient_clip_val)
+        opt_d.step()
+        neg_pred = self.discriminator(negative_video, rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None)
         gen_gan_loss = F.binary_cross_entropy_with_logits(neg_pred, torch.ones_like(neg_pred))
-        
-        # log the loss
-        loss = self.mse_loss_coeff * mse_loss + self.dis_loss_coeff * dis_gan_loss + self.gen_loss_coeff * gen_gan_loss
-        
-        self.log("training/mse_loss", mse_loss, sync_dist=True)
+        gen_loss = self.mse_loss_coeff * mse_loss + gen_gan_loss
+        opt_g.zero_grad()
+        gen_loss.backward()
+        clip_grad_value_(self.diffusion_model.parameters(), self.gradient_clip_val)
+        opt_g.step()
+
+        sche_d, sche_g = self.lr_schedulers()
+        sche_d.step(self.global_step)
+        sche_g.step(self.global_step)
+
+        self.log("training/mse_loss", mse_loss, sync_dist=True, prog_bar=True)
         self.log("training/dis_gan_loss", dis_gan_loss, sync_dist=True)
         self.log("training/gen_gan_loss", gen_gan_loss, sync_dist=True)
-        self.log("training/loss", loss, sync_dist=True, prog_bar=True)
 
         output_dict = {
             "mse_loss": mse_loss,
             "dis_gan_loss": dis_gan_loss,
             "gen_gan_loss": gen_gan_loss,
-            "loss": loss,
         }
         # if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger:
         #     xs_gt = self._unnormalize_x(xs_gt)
