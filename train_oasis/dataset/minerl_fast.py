@@ -56,8 +56,7 @@ class MinerlFastDataset(torch.utils.data.Dataset):
         # )
 
         # shuffle but keep the same order for each epoch, so validation sample is diverse yet deterministic
-        if self.split != "training":
-            random.seed(0)
+        random.seed(0)
 
         self.sec_cum_lengths = []
         self.idx_remaps = [] #list(range(self.__len__()))

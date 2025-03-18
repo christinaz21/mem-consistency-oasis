@@ -16,7 +16,7 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: latent_diffusion
+name: latent_diffusion_long
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -25,22 +25,23 @@ experiment:
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 64
+    batch_size: 32
     checkpointing:
-      every_n_train_steps: 3000
+      every_n_train_steps: 4000
   validation:
     precision: bf16-mixed
-    strategy: ddp
+    strategy: deepspeed
     batch_size: 8
     limit_batch: 1
-    val_every_n_step: 3000
+    val_every_n_step: 4000
   
 algorithm:
-  save_video_every_n_step: 3000
+  save_video_every_n_step: 4000
   warmup_steps: 6000
   
 dataset:
   external_cond_dim: 25
+  n_frames: 30
 
 model:
   precision: bf16-mixed

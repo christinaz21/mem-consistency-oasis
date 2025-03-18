@@ -108,6 +108,24 @@ class VideoPredictionExperiment:
         else:
             print("Not shuffling data")
         if train_dataset:
+            '''
+            try:
+                total_memory = torch.cuda.get_device_properties(0).total_memory
+                gpu_memory_GB = total_memory / (1024 ** 3)
+                if gpu_memory_GB <= 41:
+                    print("Using smaller batch size")
+                    batch_size = self.cfg.training.batch_size
+                elif 41 < gpu_memory_GB <= 81:
+                    print("Using larger batch size")
+                    batch_size = self.cfg.training.batch_size * 2
+                else:
+                    raise ValueError("GPU memory is too large")
+            except:
+                print("Could not get GPU memory, using default batch size")
+                batch_size = self.cfg.training.batch_size
+            print(f"Batch size: {batch_size}")
+            '''
+
             return torch.utils.data.DataLoader(
                 train_dataset,
                 batch_size=self.cfg.training.batch_size,
@@ -186,7 +204,7 @@ class VideoPredictionExperiment:
         else:
             raise ValueError(f"Unknown strategy {self.cfg.training.strategy}")
         trainer = pl.Trainer(
-            accelerator="auto",
+            accelerator="gpu",
             logger=self.logger if self.logger else False,
             devices=self.cfg.training.devices,
             num_nodes=self.cfg.num_nodes,

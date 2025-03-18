@@ -12,7 +12,7 @@ chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion ch
 n_frames: ${dataset.n_frames}
 frame_skip: ${dataset.frame_skip}
 
-vae_ckpt: /data/taiye/Project/train-oasis/models/vit/vit-l-20.safetensors
+vae_ckpt: /home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors
 scaling_factor: 0.07843137255
 
 # training hyperparameters
