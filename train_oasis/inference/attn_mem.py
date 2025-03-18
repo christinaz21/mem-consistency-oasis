@@ -42,6 +42,7 @@ def get_model(yaml_path):
         stride=config["stride"],
         max_frames=config["max_frames"],
         delta_update=True,
+        dtype=torch.float,
     )
     return model
 
@@ -53,7 +54,14 @@ def main(args):
     # load DiT checkpoint
     model = get_model(args.yaml_path)
     print(f"loading Oasis-500M from oasis-ckpt={os.path.abspath(args.oasis_ckpt)}...")
-    if args.oasis_ckpt.endswith(".pt"):
+    if os.path.isdir(args.oasis_ckpt):
+        ckpt = get_fp32_state_dict_from_zero_checkpoint(args.oasis_ckpt)
+        state_dict = {}
+        for key, value in ckpt.items():
+            if key.startswith("diffusion_model."):
+                state_dict[key[16:]] = value
+        model.load_state_dict(state_dict, strict=True)
+    elif args.oasis_ckpt.endswith(".pt") or args.oasis_ckpt.endswith(".ckpt"):
         ckpt = torch.load(args.oasis_ckpt, map_location="cpu")['state_dict']
         state_dict = {}
         for key, value in ckpt.items():
@@ -62,16 +70,9 @@ def main(args):
         model.load_state_dict(state_dict)
     elif args.oasis_ckpt.endswith(".safetensors"):
         load_model(model, args.oasis_ckpt)
-    elif os.path.isdir(args.oasis_ckpt):
-        ckpt = get_fp32_state_dict_from_zero_checkpoint(args.oasis_ckpt)
-        state_dict = {}
-        for key, value in ckpt.items():
-            if key.startswith("diffusion_model."):
-                state_dict[key[16:]] = value
-        model.load_state_dict(state_dict, strict=True)
     else:
         raise ValueError(f"unsupported checkpoint format: {args.oasis_ckpt}")
-    model = model.to(device).eval()
+    model = model.to(device=device, dtype=torch.float).eval()
 
     # sampling params
     max_frame = model.max_frames # 8
@@ -89,8 +90,8 @@ def main(args):
     else:
         video = video[::2]
     # get input action stream
-    actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames:2].to(device)
-
+    actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames * 2:2].to(device)
+    print("Action shape: ", actions.shape)
     # sampling inputs
     x = video.to(device)
     B = 1
@@ -112,7 +113,7 @@ def main(args):
         scaling_factor = 0.07843137255
         x = rearrange(x, "b t c h w -> (b t) c h w")
         with torch.no_grad():
-            with autocast("cuda", dtype=torch.half):
+            with autocast("cuda", dtype=torch.float):
                 x = vae.encode(x).mean * scaling_factor
         x = rearrange(x, "(b t) (h w) c -> b t c h w", t=n_prompt_frames, h=H // vae.patch_size, w=W // vae.patch_size)
 
@@ -142,7 +143,7 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-01-03/04-51-38/checkpoints/epoch=4-step=90000.ckpt",
+        default="outputs/2025-02-08/15-23-01/checkpoints/epoch=0-step=12000.ckpt",
     )
     parse.add_argument(
         "--yaml-path",
@@ -154,7 +155,7 @@ if __name__ == "__main__":
         "--vae-ckpt",
         type=str,
         help="Path to Oasis ViT-VAE checkpoint.",
-        default="models/oasis500m/vit-l-20.safetensors",
+        default="models/vit/vit-l-20.safetensors",
     )
     parse.add_argument(
         "--num-frames",
@@ -166,13 +167,13 @@ if __name__ == "__main__":
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.mp4",
+        default="data/VPT/validation/bumpy-pumpkin-dunker-f29a8a62df0a-20220209-203659.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.jsonl",
+        default="data/VPT/validation/bumpy-pumpkin-dunker-f29a8a62df0a-20220209-203659.jsonl",
     )
     parse.add_argument(
         "--video-offset",
@@ -184,7 +185,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/fast-120.mp4",
+        default="outputs/video/attn_mem.mp4",
     )
     parse.add_argument(
         "--fps",

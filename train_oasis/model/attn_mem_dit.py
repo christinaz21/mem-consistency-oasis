@@ -27,6 +27,10 @@ from torch.utils.checkpoint import checkpoint
 def sigma_act(x):
     return F.elu(x) + 1
 
+'''
+0 0 0 0 0 0 0 0
+        1 1 1 1 1 1 1 1
+'''
 def updateMemory(kv_mem, k, v, z, stride, delta=False):
     k = k[:, :, :stride]
     v = v[:, :, :stride]
@@ -134,7 +138,8 @@ class TemporalAxialAttention(nn.Module):
         v = rearrange(v, "B T H W (h d) -> (B H W) h T d", h=self.heads)
 
         if self.bptt:
-            new_mem = updateMemory(mem, k, v, z, self.stride, self.delta_update)
+            # new_mem = updateMemory(mem, k, v, z, self.stride, self.delta_update)
+            new_mem = updateMemory(mem, k, v, z, 8, self.delta_update)
             new_z = updateZ(z, k)
         else:
             with torch.no_grad():

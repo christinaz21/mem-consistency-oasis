@@ -1,3 +1,4 @@
+architecture: oasis_dit
 input_h: ${dataset.resolution}
 input_w: ${dataset.resolution}
 patch_size: 2

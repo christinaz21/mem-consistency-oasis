@@ -10,4 +10,3 @@ external_cond_dim: 4
 context_length: 2
 frame_skip: 2
 validation_multiplier: 1
-observation_shape: [3, *resolution, *resolution]

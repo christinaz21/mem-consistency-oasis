@@ -6,13 +6,12 @@ x_shape: ${model.observation_shape}
 data_mean: ${dataset.data_mean}
 data_std: ${dataset.data_std}
 external_cond_dim: ${dataset.external_cond_dim}
-context_frames: ${dataset.context_length}
-chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion chunk size
 
 n_frames: ${dataset.n_frames}
 frame_skip: ${dataset.frame_skip}
 
-vae_ckpt: /home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors
+vae_name: oasis
+vae_ckpt: /data/taiye/Project/train-oasis/models/vit/vit-l-20.safetensors
 scaling_factor: 0.07843137255
 
 # training hyperparameters
@@ -20,8 +19,8 @@ weight_decay: 2e-3
 warmup_steps: 10000
 optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
-
-save_video_every_n_step: 1000 # save a video every n train steps
+inference_context_length: ${dataset.context_length}
+inference_length: 20
 
 diffusion:
 # training
@@ -31,7 +30,7 @@ diffusion:
   cum_snr_decay: 0.96
   clip_noise: 6.
   # sampling
-  sampling_timesteps: 40 # fixme, numer of diffusion steps, should be increased
+  sampling_timesteps: 19 # fixme, numer of diffusion steps, should be increased
   stabilization_level: 15
   predict_v: true
 

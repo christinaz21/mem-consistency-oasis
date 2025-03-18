@@ -1,9 +1,9 @@
 # configuration parsing starts here
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: minerl_fast # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: attn_mem_video # algorithm yaml file name in configurations/algorithm folder [fixme]
-  - model: attn_mem_dit # model yaml file name in configurations/model folder [fixme]
+  - dataset: minecraft_easy # dataset yaml file name in configurations/dataset folder [fixme]
+  - algorithm: df_gan # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
@@ -16,34 +16,33 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: attn_mem
+name: apt_wo_mse
 
 experiment:
-  model_ckpt: null
+  model_ckpt: outputs/2025-03-03/17-14-45/checkpoints/epoch=2-step=26000.ckpt # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
-    lr: 2e-5
     precision: bf16-mixed
     devices: auto
-    strategy: deepspeed
-    batch_size: 12
+    strategy: ddp
+    batch_size: 16
+    max_epochs: 3
     checkpointing:
-      every_n_train_steps: 6000
+      every_n_train_steps: 4000
+    optim:
+      gradient_clip_val: 0
   validation:
     precision: bf16-mixed
     strategy: ddp
-    batch_size: 4
+    batch_size: 8
     limit_batch: 1
-    val_every_n_step: 6000
-
-dataset:
-  n_frames: 32
-  context_length: 4
-  validation_multiplier: 2
-
+    val_every_n_step: null
+    val_every_n_epoch: 50
+  
 algorithm:
-  gradient_checkpointing: true
-  mem_beta_lr: 1e-3
+  save_video_every_n_step: 2000
+  warmup_steps: 2000
+  mse_loss_coeff: 0.0
 
 model:
-  bptt: true
+  precision: bf16-mixed

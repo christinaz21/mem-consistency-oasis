@@ -1,19 +1,16 @@
+## CKPT
+
+1. 0218: flappy bird attention memory
+2. 0215-1248: flappy bird, oasis dit, window_size 30
+3. 0224: flappy bird attention memory
+4. 0228: minecraft easy
+5. 0303: easy predict_v
+6. 0310: small dataset 16 epochs
+
 ## TODO
 
-1. gradient checkpoint
-2. memory gradient
-3. memory inference
-4. YaRN
+## GAN
 
-## Question
+1. long term 的 evaluation 使用fid，fvd，psnr等都不是很可靠，因此希望训练一个discriminator。loss: gt_image + noised_image, sampled_image。bt_loss or classifier_loss ?
 
-```python
-# max_seq_len： 4096 * 4， original_seq_len： 4096，args.mscale： 1， args.rope_factor： 40
-if args.max_seq_len > args.original_seq_len:
-    mscale = 0.1 * args.mscale * math.log(args.rope_factor) + 1.0
-    self.softmax_scale = self.softmax_scale * mscale * mscale
- ```
-
- ## insight
-
- 1. attention memory 可以只用和stride等长的memory
+2. 使用gan进行post training or pre training。loss: sft_loss(ptx_loss) + gan_loss + kl_penalty? gan_loss需要进行一段sample，帮助缓解误差累积？

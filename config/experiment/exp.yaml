@@ -18,7 +18,7 @@ training:
   strategy: ddp # deepspeed or ddp
   data:
     num_workers: 8 # number of CPU threads for data preprocessing.
-    shuffle: False # whether training data will be shuffled
+    shuffle: True # whether training data will be shuffled
   optim:
     accumulate_grad_batches: 1 # accumulate gradients for n batches before backprop
     gradient_clip_val: 1.0 # clip gradients with norm above this value, set to 0 to disable

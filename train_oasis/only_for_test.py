@@ -1,24 +1,8 @@
-from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+import torch.nn.functional as F
 import torch
 
-def convert():
-    path = "/home/tc0786/Project/train-oasis/outputs/checkpoints/oasis-epoch=0-step=12000"
-    ckpt = get_fp32_state_dict_from_zero_checkpoint(path)
-    # state_dict = {}
-    # for key, value in ckpt.items():
-    #     print(key)
-    #     if key.startswith("diffusion_model."):
-    #         state_dict[key[16:]] = value
-    output_path = "/home/tc0786/Project/train-oasis/mc_dit/oasis-epoch=0-step=12000.bin"
-    # model.load_state_dict(state_dict, strict=True)
-    torch.save(ckpt, output_path)
+pred = torch.randn(3,)
+label = torch.ones(3,)
 
-def check():
-    path = "/data/taiye/Project/train-oasis/outputs/2025-02-15/12-48-53/checkpoints/epoch=0-step=12000.bin"
-    state_dict = torch.load(path)
-    for key, value in state_dict.items():
-        print(key)
-
-if __name__ == "__main__":
-    convert()
-    # check()
+pred = F.sigmoid(pred)
+print(F.binary_cross_entropy_with_logits(pred, label))

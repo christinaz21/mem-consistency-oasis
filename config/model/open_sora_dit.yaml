@@ -1,10 +1,12 @@
-input_h: 18
-input_w: 32
+architecture: sora_dit
+input_h: &h 18
+input_w: &w 32
 patch_size: 2
-in_channels: 16
+in_channels: &c 16
 hidden_size: 1152
 depth: 28
 num_heads: 16
 mlp_ratio: 4.0
 use_causal_mask: false
 gradient_checkpointing: true
+observation_shape: [*c, *h, *w]

@@ -1,13 +1,7 @@
-"""
-References:
-    - DiT: https://github.com/facebookresearch/DiT/blob/main/models.py
-    - Diffusion Forcing: https://github.com/buoyancy99/diffusion-forcing/blob/main/algorithms/diffusion_forcing/models/unet3d.py
-    - Latte: https://github.com/Vchitect/Latte/blob/main/models/latte.py
-"""
-
 from typing import Optional
 import torch
 from torch import nn
+import torch.nn.functional as F
 from train_oasis.model.rotary_embedding_torch import RotaryEmbedding
 from einops import rearrange
 from train_oasis.model.attention import SpatialAxialAttention, TemporalAxialAttention
@@ -16,7 +10,6 @@ from .blocks import (
     PatchEmbed, 
     modulate, 
     gate,
-    FinalLayer,
     TimestepEmbedder,
 )
 from torch.utils.checkpoint import checkpoint
@@ -27,7 +20,7 @@ class SpatioTemporalDiTBlock(nn.Module):
         hidden_size,
         num_heads,
         mlp_ratio=4.0,
-        is_causal=True,
+        is_causal=False,
         spatial_rotary_emb: Optional[RotaryEmbedding] = None,
         temporal_rotary_emb: Optional[RotaryEmbedding] = None,
     ):
@@ -84,8 +77,24 @@ class SpatioTemporalDiTBlock(nn.Module):
 
         return x
 
+class FinalLayer(nn.Module):
+    """
+    The final layer of DiT.
+    """
 
-class DiT(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.linear = nn.Linear(hidden_size, 1, bias=True)
+        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(hidden_size, 2 * hidden_size, bias=True))
+
+    def forward(self, x, c):
+        shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
+        x = modulate(self.norm_final(x), shift, scale)
+        x = self.linear(x)
+        return x
+
+class VideoDiscriminator(nn.Module):
     """
     Diffusion model with a Transformer backbone.
     """
@@ -100,10 +109,10 @@ class DiT(nn.Module):
         depth=12,
         num_heads=16,
         mlp_ratio=4.0,
-        external_cond_dim=25,
-        max_frames=32,
-        gradient_checkpointing=False,
-        dtype=torch.float32,
+        external_cond_dim=4,
+        max_frames=20,
+        gradient_checkpointing=True,
+        dtype=torch.bfloat16,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -128,7 +137,7 @@ class DiT(nn.Module):
                     hidden_size,
                     num_heads,
                     mlp_ratio=mlp_ratio,
-                    is_causal=True,
+                    is_causal=False,
                     spatial_rotary_emb=self.spatial_rotary_emb,
                     temporal_rotary_emb=self.temporal_rotary_emb,
                 )
@@ -136,7 +145,7 @@ class DiT(nn.Module):
             ]
         )
 
-        self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
+        self.final_layer = FinalLayer(hidden_size)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -186,7 +195,7 @@ class DiT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, w * p))
         return imgs
 
-    def forward(self, x, t, external_cond=None):
+    def forward(self, x, external_cond=None):
         """
         Forward pass of DiT.
         x: (B, T, C, H, W) tensor of spatial inputs (images or latent representations of images)
@@ -201,11 +210,12 @@ class DiT(nn.Module):
         # restore shape
         x = rearrange(x, "(b t) h w d -> b t h w d", t=T)
         # embed noise steps
-        t = rearrange(t, "b t -> (b t)")
-        c = self.t_embedder(t)  # (N, D)
-        c = rearrange(c, "(b t) d -> b t d", t=T)
-        if torch.is_tensor(external_cond):
-            c += self.external_cond(external_cond)
+        # t = rearrange(t, "b t -> (b t)")
+        # c = self.t_embedder(t)  # (N, D)
+        # c = rearrange(c, "(b t) d -> b t d", t=T)
+        # if torch.is_tensor(external_cond):
+        #     c += self.external_cond(external_cond)
+        c = self.external_cond(external_cond)
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
                 x = checkpoint(block, x, c, use_reentrant=False)
@@ -214,93 +224,8 @@ class DiT(nn.Module):
         if self.gradient_checkpointing and self.training:
             x = checkpoint(self.final_layer, x, c, use_reentrant=False)
         else:
-            x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
-        # unpatchify
-        x = rearrange(x, "b t h w d -> (b t) h w d")
-        x = self.unpatchify(x)  # (N, out_channels, H, W)
-        x = rearrange(x, "(b t) c h w -> b t c h w", t=T)
-
+            x = self.final_layer(x, c)  # (N, T, H, W, 1)
+        x = x.squeeze(-1)
+        x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+        x = x.view(B, )
         return x
-
-
-def DiT_S_2():
-    return DiT(
-        patch_size=2,
-        hidden_size=1024,
-        depth=16,
-        num_heads=16,
-    )
-
-def dit_small():
-    return DiT(
-        input_h=64,
-        input_w=64,
-        in_channels=3,
-        patch_size=2,
-        hidden_size=256,
-        depth=16,
-        num_heads=16,
-        external_cond_dim=4,
-        max_frames=10
-    )
-
-def dit_cty():
-    return DiT(
-        input_h=18,
-        input_w=32,
-        in_channels=16,
-        patch_size=2,
-        hidden_size=1024,
-        depth=16,
-        num_heads=16,
-        external_cond_dim=25,
-        max_frames=10
-    )
-
-def flappy_bird_dit():
-    return DiT(
-        input_h=64,
-        input_w=36,
-        in_channels=4,
-        patch_size=2,
-        hidden_size=512,
-        depth=8,
-        num_heads=16,
-        external_cond_dim=2,
-        max_frames=10
-    )
-
-def flappy_bird_dit_half():
-    return DiT(
-        input_h=32,
-        input_w=18,
-        in_channels=4,
-        patch_size=2,
-        hidden_size=512,
-        depth=8,
-        num_heads=16,
-        external_cond_dim=2,
-        max_frames=10
-    )
-
-def dit_easy():
-    return DiT(
-        input_h=18,
-        input_w=32,
-        in_channels=16,
-        patch_size=2,
-        hidden_size=1024,
-        depth=16,
-        num_heads=16,
-        external_cond_dim=4,
-        max_frames=10
-    )
-
-DiT_models = {
-    "DiT-S/2": DiT_S_2,
-    "dit_small": dit_small,
-    "dit_cty": dit_cty,
-    "flappy_bird_dit": flappy_bird_dit,
-    "flappy_bird_dit_half": flappy_bird_dit_half,
-    "dit_easy": dit_easy
-}

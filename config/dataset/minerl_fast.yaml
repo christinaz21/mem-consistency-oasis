@@ -10,4 +10,3 @@ external_cond_dim: 25
 context_length: 2
 frame_skip: 2
 validation_multiplier: 4
-observation_shape: [3, *h, *w]
