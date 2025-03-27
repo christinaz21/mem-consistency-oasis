@@ -22,7 +22,7 @@ import os
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
-device = "cuda:0"
+device = "cuda:4"
 
 
 def main(args):
@@ -32,7 +32,14 @@ def main(args):
     # load DiT checkpoint
     model = DiT_models[args.model_name]()
     print(f"loading Oasis-500M from oasis-ckpt={os.path.abspath(args.oasis_ckpt)}...")
-    if args.oasis_ckpt.endswith(".pt"):
+    if os.path.isdir(args.oasis_ckpt):
+        ckpt = get_fp32_state_dict_from_zero_checkpoint(args.oasis_ckpt)
+        state_dict = {}
+        for key, value in ckpt.items():
+            if key.startswith("diffusion_model."):
+                state_dict[key[16:]] = value
+        model.load_state_dict(state_dict, strict=True)
+    elif args.oasis_ckpt.endswith(".pt"):
         ckpt = torch.load(args.oasis_ckpt, weights_only=True)
         model.load_state_dict(ckpt, strict=False)
     elif args.oasis_ckpt.endswith(".safetensors"):
@@ -44,10 +51,10 @@ def main(args):
             if key.startswith("diffusion_model."):
                 state_dict[key[16:]] = value
         model.load_state_dict(state_dict, strict=True)
-    elif os.path.isdir(args.oasis_ckpt):
-        ckpt = get_fp32_state_dict_from_zero_checkpoint(args.oasis_ckpt)
+    elif args.oasis_ckpt.endswith(".ckpt"):
+        ckpt = torch.load(args.oasis_ckpt)
         state_dict = {}
-        for key, value in ckpt.items():
+        for key, value in ckpt["state_dict"].items():
             if key.startswith("diffusion_model."):
                 state_dict[key[16:]] = value
         model.load_state_dict(state_dict, strict=True)
@@ -114,6 +121,7 @@ def main(args):
 
     # TODO: try bigger window size
     model.max_frames = args.window_size
+    print(f"window size: {model.max_frames}")
 
     # sampling loop
     for i in tqdm(range(n_prompt_frames, total_frames)):
@@ -183,7 +191,7 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-03-03/17-14-45/checkpoints/epoch=2-step=26000.ckpt",
+        default="outputs/2025-03-25/04-52-19/checkpoints/epoch=0-step=16000.ckpt",
     )
     parse.add_argument(
         "--model-name",
@@ -213,19 +221,19 @@ if __name__ == "__main__":
         "--num-frames",
         type=int,
         help="How many frames should the output be?",
-        default=6000,
+        default=600,
     )
     parse.add_argument(
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/minecraft_easy/5/000019.mp4",
+        default="data/minecraft_easy/5/000038.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/minecraft_easy/5/000019.npz",
+        default="data/minecraft_easy/5/000038.npz",
     )
     parse.add_argument(
         "--video-offset",
@@ -243,7 +251,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/easy_predv_20_6000.mp4",
+        default="outputs/video/gan_600_20.mp4",
     )
     parse.add_argument(
         "--fps",

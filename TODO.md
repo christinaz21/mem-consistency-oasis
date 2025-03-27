@@ -11,6 +11,11 @@
 
 ## GAN
 
-1. long term 的 evaluation 使用fid，fvd，psnr等都不是很可靠，因此希望训练一个discriminator。loss: gt_image + noised_image, sampled_image。bt_loss or classifier_loss ?
+1. grad penalty
+2. wasserstein loss
+3. adam?
+4. noise for real image
 
-2. 使用gan进行post training or pre training。loss: sft_loss(ptx_loss) + gan_loss + kl_penalty? gan_loss需要进行一段sample，帮助缓解误差累积？
+## Q
+
+1. 为什么diffusion在20 frames上训练，但是可以在10frames上生成，30frames就不可以生成呢？是embedding的问题吗？

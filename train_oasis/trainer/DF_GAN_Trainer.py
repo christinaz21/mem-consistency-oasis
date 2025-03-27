@@ -62,7 +62,10 @@ class DFGANVideo(pl.LightningModule):
         self.predict_v = cfg.diffusion.predict_v
 
         self.mse_loss_coeff = cfg.mse_loss_coeff
+        self.gen_gan_loss_coeff = cfg.gen_gan_loss_coeff
         self.gradient_clip_val = cfg.gradient_clip_val
+        self.noise_real_image = cfg.noise_real_image
+        self.shift = cfg.shift
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -209,11 +212,11 @@ class DFGANVideo(pl.LightningModule):
 
     def configure_optimizers(self):
         if self.cfg.strategy == "ddp":
-            opt_d = torch.optim.AdamW(
-                tuple(self.discriminator.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            opt_d = torch.optim.Adam(
+                tuple(self.discriminator.parameters()), lr=self.cfg.lr,
             )
-            opt_g = torch.optim.AdamW(
-                tuple(self.diffusion_model.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            opt_g = torch.optim.Adam(
+                tuple(self.diffusion_model.parameters()), lr=self.cfg.lr,
             )
             scheduler_d = WarmUpScheduler(opt_d, self.cfg)
             scheduler_g = WarmUpScheduler(opt_g, self.cfg)
@@ -323,20 +326,33 @@ class DFGANVideo(pl.LightningModule):
 
         opt_d, opt_g = self.optimizers()
         negative_video = rearrange(xs_pred, "t b ... -> b t ...")
-        positive_video = rearrange(xs, "t b ... -> b t ...")
+        if self.noise_real_image:
+            noise = torch.randn_like(xs)
+            noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+            real_image_noise_levels = (self.shift * noise_levels) / (1 + (self.shift - 1) * noise_levels)
+            real_image_noise_levels = real_image_noise_levels.long()
+            assert (real_image_noise_levels < self.timesteps).all(), "real_image_noise_levels should be less than timesteps."
+            positive_video = self.q_sample(x_start=xs, t=real_image_noise_levels, noise=noise)
+            positive_video = rearrange(xs, "t b ... -> b t ...")
+        else:
+            positive_video = rearrange(xs, "t b ... -> b t ...")
 
         all_videos = torch.cat([positive_video, negative_video.detach()], 0)
         all_conditions = torch.cat([rearrange(conditions, "t b ... -> b t ..."), rearrange(conditions, "t b ... -> b t ...")], 0) if conditions is not None else None
-        all_labels = torch.cat([torch.ones(positive_video.shape[0]), torch.zeros(negative_video.shape[0])], 0).to(self.device)
         all_pred = self.discriminator(all_videos, all_conditions)
-        dis_gan_loss = F.binary_cross_entropy_with_logits(all_pred, all_labels)
+        # all_labels = torch.cat([torch.ones(positive_video.shape[0]), torch.zeros(negative_video.shape[0])], 0).to(self.device)
+        # dis_gan_loss = F.binary_cross_entropy_with_logits(all_pred, all_labels)
+        dis_gan_loss = -(all_pred[:positive_video.shape[0]].mean() - all_pred[positive_video.shape[0]:].mean())
         opt_d.zero_grad()
         dis_gan_loss.backward()
-        clip_grad_value_(self.discriminator.parameters(), self.gradient_clip_val)
+        # clip_grad_value_(self.discriminator.parameters(), self.gradient_clip_val)
         opt_d.step()
+        for p in self.discriminator.parameters():
+            p.data.clamp_(-0.01, 0.01)
         neg_pred = self.discriminator(negative_video, rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None)
-        gen_gan_loss = F.binary_cross_entropy_with_logits(neg_pred, torch.ones_like(neg_pred))
-        gen_loss = self.mse_loss_coeff * mse_loss + gen_gan_loss
+        gen_gan_loss = -neg_pred.mean()
+
+        gen_loss = self.mse_loss_coeff * mse_loss + self.gen_gan_loss_coeff * gen_gan_loss
         opt_g.zero_grad()
         gen_loss.backward()
         clip_grad_value_(self.diffusion_model.parameters(), self.gradient_clip_val)
@@ -347,7 +363,7 @@ class DFGANVideo(pl.LightningModule):
         sche_g.step(self.global_step)
 
         self.log("training/mse_loss", mse_loss, sync_dist=True, prog_bar=True)
-        self.log("training/dis_gan_loss", dis_gan_loss, sync_dist=True)
+        self.log("training/dis_gan_loss", dis_gan_loss, sync_dist=True, prog_bar=True)
         self.log("training/gen_gan_loss", gen_gan_loss, sync_dist=True)
 
         output_dict = {
