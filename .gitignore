@@ -8,8 +8,5 @@ __pycache__/
 *.log
 *.safetensors
 
-<<<<<<< HEAD
 flappy_bird_dit/
-=======
 mc_dit/
->>>>>>> refs/remotes/origin/master
