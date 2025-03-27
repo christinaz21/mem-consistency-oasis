@@ -11,8 +11,9 @@ import sys
 import os
 dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(dir_path)
-os.environ["TMPDIR"] = "/data/taiye/Project/train-oasis/tmp"
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+
+# os.environ["TMPDIR"] = "/data/taiye/Project/train-oasis/tmp"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
 
 from pathlib import Path
 
@@ -29,6 +30,8 @@ exp_registry = dict(
     exp=VideoPredictionExperiment,
 )
 
+# import deepspeed
+# deepspeed.ops.op_builder.CPUAdamBuilder().load()
 
 def build_experiment(
     cfg: DictConfig,
@@ -56,7 +59,7 @@ def run_local(cfg: DictConfig):
     
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     # os.environ["HYDRA_FULL_ERROR"] = "1"
-    os.environ["NCCL_P2P_DISABLE"] = "1"
+    # os.environ["NCCL_P2P_DISABLE"] = "1"
 
     # Get yaml names
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
@@ -132,8 +135,8 @@ def run_local(cfg: DictConfig):
 
 @hydra.main(
     version_base=None,
-    config_path="/data/taiye/Project/train-oasis/config",
-    config_name="apt",
+    config_path="/home/tc0786/Project/train-oasis/config",
+    config_name="latent_diffusion_easy",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:
