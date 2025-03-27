@@ -1,6 +1,7 @@
 debug: ${debug} # inherited from configurations/config.yaml
 lr: ${experiment.training.lr}
 mse_loss_coeff: 1.0
+gen_gan_loss_coeff: 0.2
 
 # dataset-dependent configurations
 x_shape: ${model.observation_shape}
@@ -14,7 +15,7 @@ n_frames: ${dataset.n_frames}
 frame_skip: ${dataset.frame_skip}
 
 vae_name: oasis
-vae_ckpt: /data/taiye/Project/train-oasis/models/vit/vit-l-20.safetensors
+vae_ckpt: /home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors
 scaling_factor: 0.07843137255
 gradient_clip_val: 1.0
 

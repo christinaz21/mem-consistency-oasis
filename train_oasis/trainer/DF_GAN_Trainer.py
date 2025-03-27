@@ -62,6 +62,7 @@ class DFGANVideo(pl.LightningModule):
         self.predict_v = cfg.diffusion.predict_v
 
         self.mse_loss_coeff = cfg.mse_loss_coeff
+        self.gen_gan_loss_coeff = cfg.gen_gan_loss_coeff
         self.gradient_clip_val = cfg.gradient_clip_val
         
         self._build_model(model_ckpt)
@@ -336,7 +337,7 @@ class DFGANVideo(pl.LightningModule):
         opt_d.step()
         neg_pred = self.discriminator(negative_video, rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None)
         gen_gan_loss = F.binary_cross_entropy_with_logits(neg_pred, torch.ones_like(neg_pred))
-        gen_loss = self.mse_loss_coeff * mse_loss + gen_gan_loss
+        gen_loss = self.mse_loss_coeff * mse_loss + self.gen_gan_loss_coeff * gen_gan_loss
         opt_g.zero_grad()
         gen_loss.backward()
         clip_grad_value_(self.diffusion_model.parameters(), self.gradient_clip_val)

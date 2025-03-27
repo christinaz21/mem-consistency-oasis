@@ -136,7 +136,7 @@ def run_local(cfg: DictConfig):
 @hydra.main(
     version_base=None,
     config_path="/home/tc0786/Project/train-oasis/config",
-    config_name="latent_diffusion",
+    config_name="latent_diffusion_easy",
 )
 def run(cfg: DictConfig):
     if "name" not in cfg:

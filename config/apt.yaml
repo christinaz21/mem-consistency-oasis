@@ -16,19 +16,19 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: apt_wo_mse
+name: apt
 
 experiment:
-  model_ckpt: outputs/2025-03-03/17-14-45/checkpoints/epoch=2-step=26000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: outputs/2025-03-25/16-03-09/checkpoints/epoch=2-step=20000.ckpt # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed
     devices: auto
     strategy: ddp
-    batch_size: 16
+    batch_size: 32
     max_epochs: 3
     checkpointing:
-      every_n_train_steps: 4000
+      every_n_train_steps: 2000
     optim:
       gradient_clip_val: 0
   validation:
@@ -42,7 +42,6 @@ experiment:
 algorithm:
   save_video_every_n_step: 2000
   warmup_steps: 2000
-  mse_loss_coeff: 0.0
 
 model:
   precision: bf16-mixed
