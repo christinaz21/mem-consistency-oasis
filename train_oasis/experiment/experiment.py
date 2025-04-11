@@ -7,6 +7,7 @@ from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
 from train_oasis.trainer.Image_Discriminator_Trainer import ImageDiscriminatorTrainer
 from train_oasis.trainer.DF_GAN_Trainer import DFGANVideo
+from train_oasis.trainer.SFP_Trainer import SingleFramePrediction
 
 from typing import Optional, Union
 import pathlib
@@ -36,6 +37,7 @@ class VideoPredictionExperiment:
         attn_mem_video=AttentionMemoryTrainer,
         img_dis=ImageDiscriminatorTrainer,
         df_gan=DFGANVideo,
+        sfp=SingleFramePrediction,
     )
 
     compatible_datasets = dict(
@@ -67,6 +69,10 @@ class VideoPredictionExperiment:
         self.logger = logger
         self.ckpt_path = ckpt_path
         self.algo = None
+
+        # set random seed
+        if self.cfg.seed is not None:
+            pl.seed_everything(self.cfg.seed, workers=True)
 
     def _build_algo(self, model_ckpt: Optional[str] = None):
         """

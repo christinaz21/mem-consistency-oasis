@@ -8,7 +8,7 @@ dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__fi
 sys.path.append(dir_path)
 
 import torch
-from train_oasis.model.dit import DiT_models
+from train_oasis.model.sfp_dit import DiT_models
 from train_oasis.model.vae import VAE_models
 from torchvision.io import read_video, write_video
 from train_oasis.utils import load_prompt, load_actions, sigmoid_beta_schedule
@@ -22,7 +22,7 @@ import os
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
-device = "cuda:4"
+device = "cuda:0"
 
 
 def main(args):
@@ -251,7 +251,7 @@ if __name__ == "__main__":
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/gan_600_20.mp4",
+        default="outputs/video/sfp_600_20.mp4",
     )
     parse.add_argument(
         "--fps",

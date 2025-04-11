@@ -11,10 +11,11 @@
 
 ## GAN
 
-1. grad penalty
-2. wasserstein loss
-3. adam?
-4. noise for real image
+1. small discriminator
+2. small lr
+3. fixed discriminator
+4. diffusion gan
+5. bytedance gradient penalty loss
 
 ## Q
 

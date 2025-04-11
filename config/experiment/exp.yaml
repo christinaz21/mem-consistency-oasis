@@ -5,6 +5,8 @@ num_nodes: 1 # number of gpu servers used in large scale distributed training
 
 model_ckpt: null # path to a pre-trained diffusion checkpoint
 
+seed: 42
+
 training:
   lr: 8e-5
   precision: 16-mixed # set float precision, 16-mixed is faster while 32 is more stable

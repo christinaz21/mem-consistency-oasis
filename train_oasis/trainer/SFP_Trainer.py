@@ -20,39 +20,17 @@ from utils import (
     extract, 
     sigmoid_beta_schedule, 
     convert_zero_ckpt_into_state_dict,
+    WarmUpScheduler
 )
-
-class WarmUpScheduler:
-    def __init__(self, optimizer, lr, warmup_steps):
-        self.optimizer = optimizer
-        self.lr = lr
-        self.warmup_steps = warmup_steps
-        for pg in self.optimizer.param_groups:
-            pg["lr"] = lr
-
-    def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
-
-    def load_state_dict(self, state_dict) -> None:
-        self.__dict__.update(state_dict)
-
-    def step(self, step):
-        if step < self.warmup_steps:
-            lr_scale = min(1.0, float(step + 1) / self.warmup_steps)
-            for pg in self.optimizer.param_groups:
-                pg["lr"] = lr_scale * self.lr
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 import torch.distributed as dist
-from train_oasis.model.video_discriminator import VideoDiscriminator
-from torch.nn.utils import clip_grad_value_
 
-class DFGANVideo(pl.LightningModule):
+class SingleFramePrediction(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
-        self.automatic_optimization = False
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
@@ -79,14 +57,6 @@ class DFGANVideo(pl.LightningModule):
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
         self.predict_v = cfg.diffusion.predict_v
-
-        self.mse_loss_coeff = cfg.mse_loss_coeff
-        self.gen_gan_loss_coeff = cfg.gen_gan_loss_coeff
-        self.gradient_clip_val = cfg.gradient_clip_val
-        self.noise_real_image = cfg.noise_real_image
-        self.disc_train_steps = cfg.disc_train_steps
-        self.gen_train_steps = cfg.gen_train_steps
-        self.disc_warmup_steps = cfg.disc_warmup_steps
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -117,47 +87,13 @@ class DFGANVideo(pl.LightningModule):
 
     def _build_model(self, model_ckpt):
         if self.model_cfg.architecture == "oasis_dit":
-            from train_oasis.model.dit import DiT
+            from train_oasis.model.sfp_dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,
                 input_w=self.model_cfg.input_w,
                 patch_size=self.model_cfg.patch_size,
                 in_channels=self.model_cfg.in_channels,
                 hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "sora_dit":
-            from train_oasis.model.open_sora_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                use_causal_mask=self.model_cfg.use_causal_mask,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "mla_dit":
-            from train_oasis.model.mla_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                lora_rank=self.model_cfg.lora_rank,
                 depth=self.model_cfg.depth,
                 num_heads=self.model_cfg.num_heads,
                 mlp_ratio=self.model_cfg.mlp_ratio,
@@ -199,9 +135,6 @@ class DFGANVideo(pl.LightningModule):
             self.vae.eval()
         else:
             self.vae = None
-
-        self.discriminator = VideoDiscriminator()
-
         self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         self.validation_fid_model = FrechetInceptionDistance(feature=64) if "fid" in self.metrics else None
@@ -232,26 +165,19 @@ class DFGANVideo(pl.LightningModule):
         register_buffer("clipped_snr", clipped_snr)
 
     def configure_optimizers(self):
+        params = tuple(self.diffusion_model.parameters())
         if self.cfg.strategy == "ddp":
-            opt_d = torch.optim.Adam(
-                tuple(self.discriminator.parameters()), lr=self.cfg.dis_lr,
+            optimizer_dynamics = torch.optim.AdamW(
+                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            opt_g = torch.optim.Adam(
-                tuple(self.diffusion_model.parameters()), lr=self.cfg.lr,
-            )
-            scheduler_d = WarmUpScheduler(opt_d, self.cfg.dis_lr, self.cfg.warmup_steps)
-            scheduler_g = WarmUpScheduler(opt_g, self.cfg.lr, self.cfg.warmup_steps)
-            return [opt_d, opt_g], [{"scheduler": scheduler_d, "interval": "step"}, {"scheduler": scheduler_g, "interval": "step"}]
+            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         elif self.cfg.strategy == "deepspeed":
-            opt_d = DeepSpeedCPUAdam(
-                tuple(self.discriminator.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
+            optimizer_dynamics = DeepSpeedCPUAdam(
+                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            opt_g = DeepSpeedCPUAdam(
-                tuple(self.diffusion_model.parameters()), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
-            )
-            scheduler_d = WarmUpScheduler(opt_d, self.cfg)
-            scheduler_g = WarmUpScheduler(opt_g, self.cfg)
-            return [opt_d, opt_g], [{"scheduler": scheduler_d, "interval": "step"}, {"scheduler": scheduler_g, "interval": "step"}]
+            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         else:
             raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
 
@@ -261,27 +187,6 @@ class DFGANVideo(pl.LightningModule):
 
     def lr_scheduler_step(self, scheduler, metric):
         scheduler.step(step=self.trainer.global_step)
-
-    def compute_loss_weights(self, noise_levels: torch.Tensor):
-        snr = self.snr[noise_levels]
-        clipped_snr = self.clipped_snr[noise_levels]
-        normalized_clipped_snr = clipped_snr / self.snr_clip
-        normalized_snr = snr / self.snr_clip
-
-        cum_snr = torch.zeros_like(normalized_snr)
-        for t in range(0, noise_levels.shape[0]):
-            if t == 0:
-                cum_snr[t] = normalized_clipped_snr[t]
-            else:
-                cum_snr[t] = self.cum_snr_decay * cum_snr[t - 1] + (1 - self.cum_snr_decay) * normalized_clipped_snr[t]
-
-        cum_snr = F.pad(cum_snr[:-1], (0, 0, 1, 0), value=0.0)
-        clipped_fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (1 - normalized_clipped_snr)
-        if self.predict_v:
-            fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (1 - normalized_snr)
-            return clipped_fused_snr * self.snr_clip / (fused_snr * self.snr_clip + 1)
-        else:
-            return clipped_fused_snr * self.snr_clip
 
     def q_sample(self, x_start, t, noise=None):
         # t random(0, timestep)
@@ -306,16 +211,18 @@ class DFGANVideo(pl.LightningModule):
         xs, conditions, masks = self._preprocess_batch(batch)
         xs_gt = xs.clone()
         xs = self.vae_encode(xs)
-        noise = torch.randn_like(xs)
+        noise = torch.randn_like(xs[-1:])
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
-        noise_levels = self._generate_noise_levels(xs, masks)
-        noised_x = self.q_sample(x_start=xs, t=noise_levels, noise=noise)
+        noise_levels = torch.randint(0, self.timesteps, (1, noise.shape[1]), device=xs.device)
+        noised_x = self.q_sample(x_start=xs[-1:], t=noise_levels, noise=noise)
+        noised_x = torch.cat([xs[:-1], noised_x], 0)
+        stab_noise = torch.full((xs.shape[0] - 1, xs.shape[1]), self.stabilization_level - 1, dtype=torch.long, device=xs.device)
+        noise_levels = torch.cat([stab_noise, noise_levels], 0)
         model_pred = self.diffusion_model(
             x=rearrange(noised_x, "t b ... -> b t ..."),
             t=rearrange(noise_levels, "t b -> b t"),
             external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
         )
-        model_pred = rearrange(model_pred, "b t ... -> t b ...")
         nan_number = torch.isnan(model_pred).sum()
         dist.all_reduce(nan_number, op=dist.ReduceOp.SUM)
         if nan_number != 0:
@@ -326,102 +233,19 @@ class DFGANVideo(pl.LightningModule):
                 "loss": loss,
             }
             return output_dict
+        else:
+            if self.predict_v:
+                target = self.predict_v_from_x(xs[-1:], noise_levels[-1:], noise).squeeze(0)
+            else:
+                target = xs[-1]
+            loss = F.mse_loss(model_pred, target.detach(), reduction="none").mean()
         
-        # mse loss
-        if self.predict_v:
-            target = self.predict_v_from_x(xs, noise_levels, noise)
-        else:
-            target = xs
-
-        mse_loss = F.mse_loss(model_pred, target.detach(), reduction="none")
-        loss_weight = self.compute_loss_weights(noise_levels)
-        loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (mse_loss.ndim - 2)))
-        mse_loss = mse_loss * loss_weight
-        mse_loss = self.reweight_loss(mse_loss, masks)
-
-        # gan loss
-        if self.predict_v:
-            xs_pred = self.predict_start_from_v(noised_x, noise_levels, model_pred)
-        else:
-            xs_pred = model_pred
-
-        opt_d, opt_g = self.optimizers()
-        if self.noise_real_image:
-            noise = torch.randn_like(xs)
-            noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
-            real_image_noise_levels = torch.randint(100, 400, (xs.shape[0], xs.shape[1]), device=xs.device)
-            real_image_noise_levels = real_image_noise_levels.long()
-            assert (real_image_noise_levels < self.timesteps).all(), "real_image_noise_levels should be less than timesteps."
-            positive_video = self.q_sample(x_start=xs, t=real_image_noise_levels, noise=noise)
-            noised_negative_video = self.q_sample(x_start=xs_pred, t=real_image_noise_levels, noise=noise)
-            positive_video = rearrange(xs, "t b ... -> b t ...")
-            noised_negative_video = rearrange(noised_negative_video, "t b ... -> b t ...")
-        else:
-            positive_video = rearrange(xs, "t b ... -> b t ...")
-            noised_negative_video = rearrange(xs_pred, "t b ... -> b t ...")
-
-        negative_video = rearrange(xs_pred, "t b ... -> b t ...")
-        if self.global_step % self.disc_train_steps == 0 or self.global_step < self.disc_warmup_steps:
-            all_videos = torch.cat([positive_video, noised_negative_video.detach()], 0)
-            all_conditions = torch.cat([rearrange(conditions, "t b ... -> b t ..."), rearrange(conditions, "t b ... -> b t ...")], 0) if conditions is not None else None
-            all_pred = self.discriminator(all_videos, all_conditions)
-            # all_labels = torch.cat([torch.ones(positive_video.shape[0]), torch.zeros(negative_video.shape[0])], 0).to(self.device)
-            # dis_gan_loss = F.binary_cross_entropy_with_logits(all_pred, all_labels)
-            dis_gan_loss = -(all_pred[:positive_video.shape[0]].mean() - all_pred[positive_video.shape[0]:].mean())
-            accuracy = (all_pred[:positive_video.shape[0]] > all_pred[positive_video.shape[0]:]).float().mean()
-            opt_d.zero_grad()
-            dis_gan_loss.backward()
-            # clip_grad_value_(self.discriminator.parameters(), self.gradient_clip_val)
-            opt_d.step()
-            
-            for p in self.discriminator.parameters():
-                p.data.clamp_(-0.01, 0.01)
-        
-            self.log("training/dis_gan_loss", dis_gan_loss, sync_dist=True, prog_bar=True)
-            self.log("training/accuracy", accuracy, sync_dist=True)
-        else:
-            dis_gan_loss = None
-
-        if self.global_step % self.gen_train_steps == 0:
-            neg_pred = self.discriminator(negative_video, rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None)
-            gen_gan_loss = -neg_pred.mean()
-            self.log("training/gen_gan_loss", gen_gan_loss, sync_dist=True)
-
-            gen_loss = self.mse_loss_coeff * mse_loss + self.gen_gan_loss_coeff * gen_gan_loss
-        else:
-            gen_loss = self.mse_loss_coeff * mse_loss
-            
-        opt_g.zero_grad()
-        gen_loss.backward()
-        clip_grad_value_(self.diffusion_model.parameters(), self.gradient_clip_val)
-        opt_g.step()
-
-        sche_d, sche_g = self.lr_schedulers()
-        self.log("training/lr_discriminator", opt_d.param_groups[0]['lr'], sync_dist=True)
-        self.log("training/lr_generator",  opt_g.param_groups[0]['lr'], sync_dist=True)
-        sche_d.step(self.global_step)
-        sche_g.step(self.global_step)
-        self.log("training/global_step", self.global_step, sync_dist=True)
-
-        self.log("training/mse_loss", mse_loss, sync_dist=True, prog_bar=True)
-        if dis_gan_loss is not None:
-            self.log("training/dis_gan_loss", dis_gan_loss, sync_dist=True, prog_bar=True)
+        # log the loss
+        self.log("training/loss", loss, sync_dist=True, prog_bar=True)
 
         output_dict = {
-            "mse_loss": mse_loss,
+            "loss": loss,
         }
-        
-        if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger and self.global_rank == 0:
-            xs_gt = self._unnormalize_x(xs_gt)
-            xs_pred = self.vae_decode(xs_pred)
-            xs_pred = self._unnormalize_x(xs_pred)
-            log_video(
-                xs_pred[:, :8],
-                xs_gt[:, :8],
-                step=self.global_step,
-                namespace="training_vis",
-                logger=self.logger.experiment,
-            )
         return output_dict
 
     @torch.no_grad()
@@ -614,21 +438,6 @@ class DFGANVideo(pl.LightningModule):
 
     def test_epoch_end(self) -> None:
         self.on_validation_epoch_end(namespace="test")
-
-    def _generate_noise_levels(self, xs: torch.Tensor, masks: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Generate noise levels for training.
-        """
-        num_frames, batch_size, *_ = xs.shape
-        # noise_levels = torch.randint(0, self.timesteps, (num_frames, batch_size), device=xs.device)
-        noise_levels = torch.randint(0, 300, (num_frames, batch_size), device=xs.device)
-
-        if masks is not None:
-            # for frames that are not available, treat as full noise
-            discard = ~masks.bool()
-            noise_levels = torch.where(discard, torch.full_like(noise_levels, self.timesteps - 1), noise_levels)
-
-        return noise_levels
 
     def _generate_scheduling_matrix(self, horizon: int):
         height = self.sampling_timesteps + int((horizon - 1) * self.sampling_timesteps) + 1

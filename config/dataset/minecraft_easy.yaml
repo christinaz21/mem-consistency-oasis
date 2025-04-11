@@ -1,6 +1,6 @@
 debug: ${debug} # inherited from configurations/config.yaml
 
-save_dir: data/mc_collect_data
+save_dir: data/minecraft_easy
 n_frames: 20 # TODO: increase later
 validation_size: 100
 h: &h 360
