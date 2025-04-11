@@ -3,7 +3,7 @@ lr: ${experiment.training.lr}
 mse_loss_coeff: 1.0
 gen_gan_loss_coeff: 5.0
 noise_real_image: true
-noise_shift: 5.0
+shift: 5.0
 
 # dataset-dependent configurations
 x_shape: ${model.observation_shape}
