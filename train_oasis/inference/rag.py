@@ -20,10 +20,29 @@ import argparse
 from pprint import pprint
 import os
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+import numpy as np
 
 assert torch.cuda.is_available()
 device = "cuda:0"
 
+def retrieve_frame_idx(actions, retrieve_num, pred_action, similarity_func="euclidean"):
+    """
+    Retrieve the frame index of the action that is most similar to the predicted action.
+    pred_action: (1, action_dim)
+    actions: (1, num_actions, action_dim)
+    retrieve_num: number of actions to retrieve
+    """
+    pred_action = pred_action[0]
+    actions = actions[0]
+    if similarity_func == "cosine":
+        similarity = 1 - np.dot(actions, pred_action) / (np.linalg.norm(actions, axis=1) * np.linalg.norm(pred_action))
+    elif similarity_func == "euclidean":
+        similarity = np.linalg.norm(actions - pred_action, axis=1)
+    else:
+        raise ValueError(f"unsupported similarity function: {similarity_func}")
+    # retrieve the top-k most similar actions
+    topk_idx = np.argsort(similarity)[:retrieve_num]
+    return topk_idx
 
 def main(args):
     torch.manual_seed(0)
@@ -95,6 +114,7 @@ def main(args):
         actions = torch.cat(copy_actions_list, dim=1)
         actions = actions[:, :total_frames]
     assert actions.shape[1] == total_frames, f"{actions.shape[1]} != {total_frames}"
+    actions = actions[:, :, 4:]
     print(actions.shape)
     # sampling inputs
     B = x.shape[0]
@@ -130,6 +150,21 @@ def main(args):
         x = torch.cat([x, chunk], dim=1)
         start_frame = max(0, i + 1 - model.max_frames)
 
+        if i >= model.max_frames:
+            # retrieve actions
+            context_frame = start_frame + args.retrieve_num
+            candidate_actions = actions[:, :context_frame]
+            retrieved_idx = retrieve_frame_idx(
+                candidate_actions,
+                retrieve_num=args.retrieve_num,
+                pred_action=actions[:, i],
+                similarity_func="euclidean",
+            )
+            retrieved_actions = actions[:, retrieved_idx]
+            retrieved_frames = x[:, retrieved_idx]
+            context_actions = torch.cat([retrieved_actions, actions[:, context_frame:i+1]], dim=1)
+            context_frames = torch.cat([retrieved_frames, x[:, context_frame:i]], dim=1)
+
         for noise_idx in reversed(range(1, ddim_noise_steps + 1)):
             # set up noise values
             t_ctx = torch.full((B, i), stabilization_level - 1, dtype=torch.long, device=device)
@@ -140,15 +175,14 @@ def main(args):
             t_next = torch.cat([t_ctx, t_next], dim=1)
 
             # sliding window
-            x_curr = x.clone()
-            x_curr = x_curr[:, start_frame:]
+            x_curr = torch.cat([context_frames, x[:, -1:]], dim=1)
             t = t[:, start_frame:]
             t_next = t_next[:, start_frame:]
 
             # get model predictions
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.half):
-                    v = model(x_curr, t, actions[:, start_frame : i + 1])
+                    v = model(x_curr, t, context_actions)
             
             if args.predict_v:
                 x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
@@ -258,6 +292,12 @@ if __name__ == "__main__":
         type=int,
         help="What framerate should be used to save the output?",
         default=20,
+    )
+    parse.add_argument(
+        "--retrieve_num",
+        type=int,
+        help="How many actions to retrieve.",
+        default=10,
     )
     parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=20)
 

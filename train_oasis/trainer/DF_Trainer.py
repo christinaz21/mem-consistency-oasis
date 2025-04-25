@@ -303,7 +303,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         output_dict = {
             "loss": loss,
         }
-        if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger:
+        if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger and self.global_rank == 0 and False:
             xs_gt = self._unnormalize_x(xs_gt)
             if self.predict_v:
                 model_pred = self.predict_start_from_v(noised_x, noise_levels, model_pred)

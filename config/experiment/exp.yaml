@@ -15,11 +15,11 @@ training:
   max_epochs: 5 # set to -1 to train forever
   max_steps: -1 # set to -1 to train forever, will override max_epochs
   max_time: null # set to something like "00:12:00:00" to enable
-  log_every_n_steps: 50 # log loss every n train steps
+  log_every_n_steps: 10 # log loss every n train steps
   devices: -1
   strategy: ddp # deepspeed or ddp
   data:
-    num_workers: 8 # number of CPU threads for data preprocessing.
+    num_workers: 4 # number of CPU threads for data preprocessing.
     shuffle: True # whether training data will be shuffled
   optim:
     accumulate_grad_batches: 1 # accumulate gradients for n batches before backprop
