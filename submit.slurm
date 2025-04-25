@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=apt           # create a short name for your job
+#SBATCH --job-name=wgan           # create a short name for your job
 #SBATCH --partition=pli
 #SBATCH --account=oasis
 #SBATCH --nodes=1                # node count
@@ -7,12 +7,12 @@
 #SBATCH --cpus-per-task=96       # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --mem=960G
 #SBATCH --gres=gpu:8             # number of gpus per node
-#SBATCH --time=72:00:00          # total run time limit (HH:MM:SS)
-#SBATCH --output=outputs/logs/apt-%J.log
-#SBATCH --error=outputs/logs/apt-%J.log
+#SBATCH --time=28:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --output=outputs/logs/wgan-%J.log
+#SBATCH --error=outputs/logs/wgan-%J.log
 
 module purge
-module load anaconda
+module load anaconda3/2024.6
 conda activate oasis
 echo "gcc version: $(gcc --version)"
 
