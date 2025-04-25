@@ -3,6 +3,7 @@ from train_oasis.dataset.minerl_fast import MinerlFastDataset
 from train_oasis.dataset.minecraftvideo import MinecraftVideoDataset
 from train_oasis.dataset.flappy_bird_fast import FlappyBirdFastDataset
 from train_oasis.dataset.minecraft_easy import MinecraftEasyDataset
+from train_oasis.dataset.minecraft_pos import MinecraftPosDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
 from train_oasis.trainer.Image_Discriminator_Trainer import ImageDiscriminatorTrainer
@@ -47,6 +48,7 @@ class VideoPredictionExperiment:
         minerl_fast=MinerlFastDataset,
         flappy_bird_fast=FlappyBirdFastDataset,
         minecraft_easy=MinecraftEasyDataset,
+        minecraft_pos=MinecraftPosDataset,
     )
 
     def __init__(

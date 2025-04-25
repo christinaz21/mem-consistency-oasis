@@ -1,8 +1,8 @@
 # configuration parsing starts here
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: minecraft_easy # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: df_gan # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - dataset: minecraft_pos # dataset yaml file name in configurations/dataset folder [fixme]
+  - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
   - model: dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
@@ -16,36 +16,30 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: larger-lr
+name: latent_diffusion_pos
 
 experiment:
-  model_ckpt: outputs/2025-03-03/17-14-45/checkpoints/epoch=2-step=26000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed
     devices: auto
-    strategy: ddp
-    batch_size: 16
-    max_epochs: 1
+    strategy: deepspeed
+    batch_size: 64
+    max_epochs: 3
     checkpointing:
-      every_n_train_steps: 2000
-    optim:
-      gradient_clip_val: 0
+      every_n_train_steps: 1000
   validation:
     precision: bf16-mixed
-    strategy: ddp
+    strategy: deepspeed
     batch_size: 8
     limit_batch: 1
     val_every_n_step: null
     val_every_n_epoch: 50
   
 algorithm:
-  save_video_every_n_step: 1000
-  warmup_steps: 2000
-  mse_loss_coeff: 1.0
-  gen_gan_loss_coeff: 0.3
-  disc_train_steps: 1
-  noise_real_image: true
+  save_video_every_n_step: 2000
+  warmup_steps: 1000
 
 model:
   precision: bf16-mixed

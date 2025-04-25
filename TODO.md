@@ -5,7 +5,7 @@
 3. 0224: flappy bird attention memory
 4. 0228: minecraft easy
 5. 0303: easy predict_v
-6. 0310: small dataset 16 epochs
+
 
 ## TODO
 

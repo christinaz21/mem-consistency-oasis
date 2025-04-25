@@ -1,6 +1,6 @@
 debug: ${debug} # inherited from configurations/config.yaml
 lr: ${experiment.training.lr}
-dis_lr: 2e-5
+dis_lr: 8e-4
 mse_loss_coeff: 1.0
 gen_gan_loss_coeff: 1.0
 noise_real_image: true

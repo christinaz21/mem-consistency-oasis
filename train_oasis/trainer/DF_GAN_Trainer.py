@@ -200,7 +200,7 @@ class DFGANVideo(pl.LightningModule):
         else:
             self.vae = None
 
-        self.discriminator = VideoDiscriminator()
+        self.discriminator = VideoDiscriminator(depth=16)
 
         self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
@@ -349,7 +349,7 @@ class DFGANVideo(pl.LightningModule):
         if self.noise_real_image:
             noise = torch.randn_like(xs)
             noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
-            real_image_noise_levels = torch.randint(100, 400, (xs.shape[0], xs.shape[1]), device=xs.device)
+            real_image_noise_levels = torch.randint(0, 100, (xs.shape[0], xs.shape[1]), device=xs.device)
             real_image_noise_levels = real_image_noise_levels.long()
             assert (real_image_noise_levels < self.timesteps).all(), "real_image_noise_levels should be less than timesteps."
             positive_video = self.q_sample(x_start=xs, t=real_image_noise_levels, noise=noise)
@@ -371,7 +371,7 @@ class DFGANVideo(pl.LightningModule):
             accuracy = (all_pred[:positive_video.shape[0]] > all_pred[positive_video.shape[0]:]).float().mean()
             opt_d.zero_grad()
             dis_gan_loss.backward()
-            # clip_grad_value_(self.discriminator.parameters(), self.gradient_clip_val)
+            clip_grad_value_(self.discriminator.parameters(), self.gradient_clip_val)
             opt_d.step()
             
             for p in self.discriminator.parameters():
@@ -379,10 +379,13 @@ class DFGANVideo(pl.LightningModule):
         
             self.log("training/dis_gan_loss", dis_gan_loss, sync_dist=True, prog_bar=True)
             self.log("training/accuracy", accuracy, sync_dist=True)
+            # if self.global_rank == 0:
+            #     print(all_pred[:positive_video.shape[0]])
+            #     print(all_pred[positive_video.shape[0]:])
         else:
             dis_gan_loss = None
 
-        if self.global_step % self.gen_train_steps == 0:
+        if self.global_step % self.gen_train_steps == 0 and not self.global_step < self.disc_warmup_steps:
             neg_pred = self.discriminator(negative_video, rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None)
             gen_gan_loss = -neg_pred.mean()
             self.log("training/gen_gan_loss", gen_gan_loss, sync_dist=True)
@@ -621,7 +624,7 @@ class DFGANVideo(pl.LightningModule):
         """
         num_frames, batch_size, *_ = xs.shape
         # noise_levels = torch.randint(0, self.timesteps, (num_frames, batch_size), device=xs.device)
-        noise_levels = torch.randint(0, 300, (num_frames, batch_size), device=xs.device)
+        noise_levels = torch.randint(0, 200, (num_frames, batch_size), device=xs.device)
 
         if masks is not None:
             # for frames that are not available, treat as full noise
