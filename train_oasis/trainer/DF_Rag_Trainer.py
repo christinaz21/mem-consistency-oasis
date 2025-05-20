@@ -5,6 +5,7 @@ By its MIT license, you must keep the above sentence in `README.md`
 and the `LICENSE` file to credit the author.
 """
 from typing import Any, Union, Sequence, Optional
+from tqdm import tqdm
 from omegaconf import DictConfig
 import numpy as np
 import torch
@@ -19,42 +20,30 @@ from utils import (
     extract, 
     sigmoid_beta_schedule, 
     convert_zero_ckpt_into_state_dict,
+    WarmUpScheduler
 )
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
-from torch import distributed as dist
+import torch.distributed as dist
 
-class WarmUpScheduler:
-    def __init__(self, optimizer, cfg):
-        self.optimizer = optimizer
-        self.cfg = cfg
-
-    def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
-
-    def load_state_dict(self, state_dict) -> None:
-        self.__dict__.update(state_dict)
-
-    def step(self, step):
-        if step < self.cfg.warmup_steps:
-            lr_scale = min(1.0, float(step + 1) / self.cfg.warmup_steps)
-            assert len(self.optimizer.param_groups) == 2, "Only support two param groups for now."
-            self.optimizer.param_groups[0]["lr"] = lr_scale * self.cfg.mem_beta_lr
-            self.optimizer.param_groups[1]["lr"] = lr_scale * self.cfg.lr
-
-
-class AttentionMemoryTrainer(pl.LightningModule):
+class DiffusionForcingRagVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
+        # if self.cfg.vae_name == "oasis":
+        #     self.x_shape = [16, 18, 32]
+        # elif self.cfg.vae_name == "flappy_bird":
+        #     self.x_shape = [4, 64, 36]
         self.vae_name = cfg.vae_name
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
+        self.similarity_func = cfg.similarity_func
+        self.retrieve_num = cfg.retrieve_num
 
         self.timesteps = cfg.diffusion.timesteps
         self.sampling_timesteps = cfg.diffusion.sampling_timesteps
@@ -69,9 +58,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
-        self.gradient_checkpointing = cfg.gradient_checkpointing
-
-        self.stride = model_cfg.stride
+        self.predict_v = cfg.diffusion.predict_v
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -101,27 +88,58 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
 
     def _build_model(self, model_ckpt):
-        from train_oasis.model.attn_mem_dit import DiT
-        self.diffusion_model = DiT(
-            input_h=self.model_cfg.input_h,
-            input_w=self.model_cfg.input_w,
-            patch_size=self.model_cfg.patch_size,
-            in_channels=self.model_cfg.in_channels,
-            hidden_size=self.model_cfg.hidden_size,
-            depth=self.model_cfg.depth,
-            num_heads=self.model_cfg.num_heads,
-            mlp_ratio=self.model_cfg.mlp_ratio,
-            external_cond_dim=self.external_cond_dim,
-            max_frames=self.model_cfg.max_frames,
-            stride=self.model_cfg.stride,
-            stabilization_level=self.stabilization_level,
-            clip_noise=self.clip_noise,
-            timesteps=self.timesteps,
-            delta_update=self.model_cfg.delta_update,
-            bptt=self.model_cfg.bptt,
-            gradient_ckeckpointing=self.gradient_checkpointing,
-            dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-        )
+        if self.model_cfg.architecture == "oasis_dit":
+            from train_oasis.model.dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        elif self.model_cfg.architecture == "sora_dit":
+            from train_oasis.model.open_sora_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                use_causal_mask=self.model_cfg.use_causal_mask,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        elif self.model_cfg.architecture == "mla_dit":
+            from train_oasis.model.mla_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                lora_rank=self.model_cfg.lora_rank,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        else:
+            raise ValueError(f"Unsupported model {self.model_cfg._name}.")
         
         if model_ckpt:
             print(f"Loading Diffusion model from {model_ckpt}")
@@ -160,11 +178,12 @@ class AttentionMemoryTrainer(pl.LightningModule):
         self.validation_fvd_model = [FrechetVideoDistance()] if "fvd" in self.metrics else None
 
     def _build_buffer(self):
-        global_nan_number = torch.tensor(0, dtype=torch.int32)
+        global_nan_number = torch.tensor(0, dtype=torch.float)
         self.register_buffer("global_nan_number", global_nan_number)
-        
+
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
 
+        register_buffer("rag_weight", torch.tensor(self.cfg.rag_weight).reshape(1, 1, 4))
         betas = sigmoid_beta_schedule(self.timesteps).float()
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
@@ -173,8 +192,8 @@ class AttentionMemoryTrainer(pl.LightningModule):
         register_buffer("sqrt_alphas_cumprod", sqrt_alphas_cumprod)
         sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt()
         register_buffer("sqrt_one_minus_alphas_cumprod", sqrt_one_minus_alphas_cumprod)
-        # register_buffer("sqrt_recip_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod))
-        # register_buffer("sqrt_recipm1_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod - 1))
+        register_buffer("sqrt_recip_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod))
+        register_buffer("sqrt_recipm1_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod - 1))
 
         snr = alphas_cumprod / (1 - alphas_cumprod)
         register_buffer("snr", snr)
@@ -183,38 +202,16 @@ class AttentionMemoryTrainer(pl.LightningModule):
         register_buffer("clipped_snr", clipped_snr)
 
     def configure_optimizers(self):
-        # params = tuple(self.diffusion_model.parameters())
-        mem_beta_group = []
-        else_group = []
-        for name, param in self.diffusion_model.named_parameters():
-            if "mem_beta" in name:
-                mem_beta_group.append(param)
-            else:
-                else_group.append(param)
+        params = tuple(self.diffusion_model.parameters())
         if self.cfg.strategy == "ddp":
-            # optimizer_dynamics = torch.optim.AdamW(
-            #     params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
-            # )
             optimizer_dynamics = torch.optim.AdamW(
-                [
-                    {"params": mem_beta_group, "lr": self.cfg.mem_beta_lr, "weight_decay": 0.0},
-                    {"params": else_group},
-                ],
-                lr=self.cfg.lr,
-                weight_decay=self.cfg.weight_decay,
-                betas=self.cfg.optimizer_beta,
+                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
             scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
             return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         elif self.cfg.strategy == "deepspeed":
             optimizer_dynamics = DeepSpeedCPUAdam(
-                [
-                    {"params": mem_beta_group, "lr": self.cfg.mem_beta_lr, "weight_decay": 0.0},
-                    {"params": else_group},
-                ],
-                lr=self.cfg.lr,
-                weight_decay=self.cfg.weight_decay,
-                betas=self.cfg.optimizer_beta,
+                params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
             scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
             return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
@@ -243,8 +240,11 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
         cum_snr = F.pad(cum_snr[:-1], (0, 0, 1, 0), value=0.0)
         clipped_fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (1 - normalized_clipped_snr)
-
-        return clipped_fused_snr * self.snr_clip
+        if self.predict_v:
+            fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (1 - normalized_snr)
+            return clipped_fused_snr * self.snr_clip / (fused_snr * self.snr_clip + 1)
+        else:
+            return clipped_fused_snr * self.snr_clip
 
     def q_sample(self, x_start, t, noise=None):
         # t random(0, timestep)
@@ -252,7 +252,19 @@ class AttentionMemoryTrainer(pl.LightningModule):
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
             + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
+
+    def predict_v_from_x(self, x_start, t, noise):
+        return (
+            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * noise
+            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
+        )
     
+    def predict_start_from_v(self, x_t, t, v):
+        return (
+            extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t
+            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
+        )
+
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         xs, conditions, masks = self._preprocess_batch(batch)
         xs_gt = xs.clone()
@@ -272,13 +284,17 @@ class AttentionMemoryTrainer(pl.LightningModule):
         if nan_number != 0:
             loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
             self.global_nan_number += 1
-            self.log("training/nan", self.global_nan_number, prog_bar=True)
+            self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
             output_dict = {
                 "loss": loss,
             }
             return output_dict
         else:
-            loss = F.mse_loss(model_pred, xs.detach(), reduction="none")
+            if self.predict_v:
+                target = self.predict_v_from_x(xs, noise_levels, noise)
+            else:
+                target = xs
+            loss = F.mse_loss(model_pred, target.detach(), reduction="none")
             loss_weight = self.compute_loss_weights(noise_levels)
             loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
             loss = loss * loss_weight
@@ -287,19 +303,18 @@ class AttentionMemoryTrainer(pl.LightningModule):
         # log the loss
         self.log("training/loss", loss, sync_dist=True, prog_bar=True)
 
-        xs_gt = self._unnormalize_x(xs_gt)
-        model_pred = self.vae_decode(model_pred)
-        model_pred = self._unnormalize_x(model_pred)
-
         output_dict = {
             "loss": loss,
-            "xs_pred": model_pred,
-            "xs": xs_gt,
         }
-        if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger and self.global_rank == 0:
+        if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger and self.global_rank == 0 and False:
+            xs_gt = self._unnormalize_x(xs_gt)
+            if self.predict_v:
+                model_pred = self.predict_start_from_v(noised_x, noise_levels, model_pred)
+            model_pred = self.vae_decode(model_pred)
+            model_pred = self._unnormalize_x(model_pred)
             log_video(
-                output_dict["xs_pred"][:, :8],
-                output_dict["xs"][:, :8],
+                model_pred[:, :8],
+                xs_gt[:, :8],
                 step=self.global_step,
                 namespace="training_vis",
                 logger=self.logger.experiment,
@@ -308,30 +323,79 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
-        xs, conditions, masks = self._preprocess_batch(batch)
-        xs_gt = xs.clone()
-        xs = self.vae_encode(xs)
-        n_frames, batch_size, *_ = xs.shape
+        return None
 
-        # context
-        n_context_frames = self.context_frames
-        xs_pred = xs[:n_context_frames].clone()
+    def add_shape_channels(self, x):
+        return rearrange(x, f"... -> ...{' 1' * len(self.x_shape)}")
 
-        xs_pred = rearrange(xs_pred, "t b ... -> b t ...")
-        conditions = rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None
-        xs_pred = self.diffusion_model.sample(xs_pred, n_context_frames, n_frames, self.sampling_timesteps, conditions)
-        xs_pred = rearrange(xs_pred, "b t ... -> t b ...")
+    def predict_noise_from_start(self, x_t, t, x0):
+        return (extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0) / extract(
+            self.sqrt_recipm1_alphas_cumprod, t, x_t.shape
+        )
+
+    @torch.no_grad()
+    def sample_step(
+        self,
+        x: torch.Tensor,
+        external_cond: Optional[torch.Tensor],
+        curr_noise_level: torch.Tensor,
+        next_noise_level: torch.Tensor,
+    ):
+        real_steps = torch.linspace(-1, self.timesteps - 1, steps=self.sampling_timesteps + 1, device=x.device).long()
+
+        # convert noise levels (0 ~ sampling_timesteps) to real noise levels (-1 ~ timesteps - 1)
+        curr_noise_level = real_steps[curr_noise_level]
+        next_noise_level = real_steps[next_noise_level]
+
+        clipped_curr_noise_level = torch.where(
+            curr_noise_level < 0,
+            torch.full_like(curr_noise_level, self.stabilization_level - 1, dtype=torch.long),
+            curr_noise_level,
+        )
+
+        # treating as stabilization would require us to scale with sqrt of alpha_cum
+        orig_x = x.clone().detach()
+        scaled_context = self.q_sample(
+            x,
+            clipped_curr_noise_level,
+            noise=torch.zeros_like(x),
+        )
+        x = torch.where(self.add_shape_channels(curr_noise_level < 0), scaled_context, orig_x)
+
+        alpha_next = torch.where(
+            next_noise_level < 0,
+            torch.ones_like(next_noise_level),
+            self.alphas_cumprod[next_noise_level],
+        )
+        c = (1 - alpha_next).sqrt()
+
+        alpha_next = self.add_shape_channels(alpha_next)
+        c = self.add_shape_channels(c)
+
+        model_pred = self.diffusion_model(
+            x=rearrange(x, "t b ... -> b t ..."),
+            t=rearrange(clipped_curr_noise_level, "t b -> b t"),
+            external_cond=rearrange(external_cond, "t b ... -> b t ...") if external_cond is not None else None,
+        )
+        model_pred = rearrange(model_pred, "b t ... -> t b ...")
         
-        # FIXME: loss
-        loss = F.mse_loss(xs_pred, xs, reduction="none")
-        loss = self.reweight_loss(loss, masks)
+        if self.predict_v:
+            x_start = self.predict_start_from_v(x, clipped_curr_noise_level, model_pred)
+        else:
+            x_start = model_pred
+        pred_noise = self.predict_noise_from_start(x, clipped_curr_noise_level, x_start)
 
-        xs_gt = self._unnormalize_x(xs_gt)
-        xs_pred = self.vae_decode(xs_pred)
-        xs_pred = self._unnormalize_x(xs_pred)
-        self.validation_step_outputs.append((xs_pred.detach().cpu(), xs_gt.detach().cpu()))
+        x_pred = x_start * alpha_next.sqrt() + pred_noise * c
 
-        return loss
+        # only update frames where the noise level decreases
+        mask = curr_noise_level == next_noise_level
+        x_pred = torch.where(
+            self.add_shape_channels(mask),
+            orig_x,
+            x_pred,
+        )
+
+        return x_pred
     
     def on_validation_epoch_end(self, namespace="validation") -> None:
         if not self.validation_step_outputs:
@@ -381,9 +445,7 @@ class AttentionMemoryTrainer(pl.LightningModule):
         Generate noise levels for training.
         """
         num_frames, batch_size, *_ = xs.shape
-        noise_levels = torch.randint(0, self.timesteps, (num_frames // self.stride, batch_size), device=xs.device)
-        noise_levels = noise_levels.repeat_interleave(self.stride, dim=0)
-        noise_levels = noise_levels[:num_frames]
+        noise_levels = torch.randint(0, self.timesteps, (num_frames, batch_size), device=xs.device)
 
         if masks is not None:
             # for frames that are not available, treat as full noise
@@ -391,6 +453,15 @@ class AttentionMemoryTrainer(pl.LightningModule):
             noise_levels = torch.where(discard, torch.full_like(noise_levels, self.timesteps - 1), noise_levels)
 
         return noise_levels
+
+    def _generate_scheduling_matrix(self, horizon: int):
+        height = self.sampling_timesteps + int((horizon - 1) * self.sampling_timesteps) + 1
+        scheduling_matrix = np.zeros((height, horizon), dtype=np.int64)
+        for m in range(height):
+            for t in range(horizon):
+                scheduling_matrix[m, t] = self.sampling_timesteps + int(t * self.sampling_timesteps) - m
+
+        return np.clip(scheduling_matrix, 0, self.sampling_timesteps)
 
     def reweight_loss(self, loss, weight=None):
         # Note there is another part of loss reweighting (fused_snr) inside the Diffusion class!
@@ -443,21 +514,64 @@ class AttentionMemoryTrainer(pl.LightningModule):
         else:
             raise ValueError(f"Unsupported VAE {self.vae_name}.")
 
+    def retrieve_frame_idx(self, actions, retrieve_num, pred_action):
+        """
+        Retrieve the frame index of the action that is most similar to the predicted action.
+        pred_action: (B, 1, action_dim)
+        actions: (B, num_actions, action_dim)
+        retrieve_num: number of actions to retrieve
+        """
+        pred_action = pred_action * self.rag_weight
+        actions = actions * self.rag_weight
+
+        if self.similarity_func == "cosine":
+            similarity = 1 - torch.nn.functional.cosine_similarity(actions, pred_action, dim=-1)
+        elif self.similarity_func == "euclidean":
+            similarity = torch.norm(actions - pred_action, dim=-1)
+        else:
+            raise ValueError(f"unsupported similarity function: {self.similarity_func}")
+        # retrieve the top-k most similar actions
+        topk_idx = torch.topk(similarity, retrieve_num, dim=-1, largest=False).indices
+        # (B, retrieve_num)
+        return topk_idx
+
     def _preprocess_batch(self, batch):
         xs = batch[0]
         batch_size, n_frames, c, h, w = xs.shape
 
-        masks = torch.ones(n_frames, batch_size).to(self.device)
+        conditions = batch[1]
+        conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
 
-        if self.external_cond_dim > 0:
-            conditions = batch[1]
-            conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
-            conditions = rearrange(conditions, "b t d -> t b d").contiguous()
-        else:
-            conditions = None
+        pred_action = conditions[:, -1, 4:]
+        retrieve_actions = conditions[:, :-(self.n_frames-self.retrieve_num), 4:]
+        pred_action = pred_action.reshape(batch_size, 1, -1)
+        retrieve_idx = self.retrieve_frame_idx(retrieve_actions, self.retrieve_num, pred_action)
+        
+        retrieve_actions = torch.gather(
+            retrieve_actions, 
+            1, 
+            retrieve_idx.unsqueeze(-1).expand(-1, -1, retrieve_actions.size(-1))
+        )
+        retrieve_actions = retrieve_actions.reshape(batch_size, self.retrieve_num, -1)
+        zero_actions = torch.zeros_like(retrieve_actions)
+        retrieve_actions = torch.cat([zero_actions, retrieve_actions], dim=-1)
+        conditions = torch.cat([retrieve_actions, conditions[:, -(self.n_frames-self.retrieve_num):]], dim=1)
+
+        retrieve_frames = torch.gather(
+            xs, 
+            1, 
+            retrieve_idx.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, c, h, w)
+        )
+        retrieve_frames = retrieve_frames.reshape(batch_size, self.retrieve_num, c, h, w)
+        xs = torch.cat([retrieve_frames, xs[:, -(self.n_frames-self.retrieve_num):]], dim=1)
+
+        masks = torch.ones(self.n_frames, batch_size).to(self.device)
+        conditions = rearrange(conditions, "b t d -> t b d").contiguous()
 
         xs = self._normalize_x(xs)
         xs = rearrange(xs, "b t c ... -> t b c ...").contiguous()
+        assert conditions.shape == (self.n_frames, batch_size, self.external_cond_dim)
+        assert xs.shape == (self.n_frames, batch_size, c, h, w)
 
         return xs, conditions, masks
 

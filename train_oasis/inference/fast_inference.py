@@ -19,12 +19,9 @@ from safetensors.torch import load_model
 import argparse
 from pprint import pprint
 from pytorchvideo.data.encoded_video import EncodedVideo
-from torchvision import transforms
-from pathlib import Path
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 device = torch.device("cuda")
 print(f"using device: {device}")
 
@@ -78,13 +75,8 @@ def main(args):
     video = video.get_clip(start_sec=0.0, end_sec=video.duration)["video"]
     video = video.permute(1, 2, 3, 0).numpy()[args.video_offset:args.video_offset+2*max_frame]
     video = torch.from_numpy(video / 255.0).float().permute(0, 3, 1, 2).contiguous()
-    if args.vae_ckpt is None:
-        transform = transforms.Resize((64, 64), antialias=True)
-        video = transform(video)[::2]
-    else:
-        video = video[::2]
     # get input action stream
-    actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames].to(device)
+    actions = load_actions(args.actions_path, action_offset=args.video_offset)[:, :total_frames, :4].to(device)
 
     # sampling inputs
     x = video.to(device)
@@ -158,8 +150,9 @@ def main(args):
             # get model predictions
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.half):
-                    x_start = model(x_curr, t, actions[:, start_frame : i + 1])
+                    v = model(x_curr, t, actions[:, start_frame : i + 1])
 
+            x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
             x_noise = ((1 / alphas_cumprod[t]).sqrt() * x_curr - x_start) / (1 / alphas_cumprod[t] - 1).sqrt()
 
             # get frame prediction
@@ -191,8 +184,9 @@ def main(args):
             # get model predictions
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.half):
-                    x_start = model(x_curr, t, actions[:, start_frame : i + 1])
+                    v = model(x_curr, t, actions[:, start_frame : i + 1])
 
+            x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
             x_noise = ((1 / alphas_cumprod[t]).sqrt() * x_curr - x_start) / (1 / alphas_cumprod[t] - 1).sqrt()
 
             # get frame prediction
@@ -216,6 +210,7 @@ def main(args):
     x = torch.clamp(x, 0, 1)
     x = (x * 255).byte()
     x = x[0].cpu().numpy()
+    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     write_video(args.output_path, x, fps=args.fps)
     print(f"generation saved to {args.output_path}.")
 
@@ -226,13 +221,13 @@ if __name__ == "__main__":
         "--oasis-ckpt",
         type=str,
         help="Path to Oasis DiT checkpoint.",
-        default="outputs/2025-01-03/04-51-38/checkpoints/epoch=4-step=90000.ckpt",
+        default="/home/tc0786/Project/train-oasis/outputs/2025-05-07/03-28-14/checkpoints/epoch=2-step=13000.ckpt",
     )
     parse.add_argument(
         "--model-name",
         type=str,
         help="Model name",
-        default="dit_cty",
+        default="dit_easy",
     )
     parse.add_argument(
         "--vae-ckpt",
@@ -244,31 +239,31 @@ if __name__ == "__main__":
         "--num-frames",
         type=int,
         help="How many frames should the output be?",
-        default=120,
+        default=300,
     )
     parse.add_argument(
         "--prompt-path",
         type=str,
         help="Path to image or video to condition generation on.",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.mp4",
+        default="/home/tc0786/Project/train-oasis/data/eval_data/memory/rotate/000000.mp4",
     )
     parse.add_argument(
         "--actions-path",
         type=str,
         help="File to load actions from (.actions.pt or .one_hot_actions.pt)",
-        default="data/VPT/validation/bumpy-pumpkin-dunker-f153ac423f61-20220215-192245.jsonl",
+        default="/home/tc0786/Project/train-oasis/data/eval_data/memory/rotate/000000.npz",
     )
     parse.add_argument(
         "--video-offset",
         type=int,
         help="If loading prompt from video, index of frame to start reading from.",
-        default=30,
+        default=0,
     )
     parse.add_argument(
         "--output-path",
         type=str,
         help="Path where generated video should be saved.",
-        default="outputs/video/fast-120.mp4",
+        default="/home/tc0786/Project/train-oasis/outputs/eval_outputs/vanilla_10/memory/rotate/000000.mp4",
     )
     parse.add_argument(
         "--fps",
@@ -276,7 +271,7 @@ if __name__ == "__main__":
         help="What framerate should be used to save the output?",
         default=20,
     )
-    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=36)
+    parse.add_argument("--ddim-steps", type=int, help="How many DDIM steps?", default=18)
 
     args = parse.parse_args()
     print("inference args:")

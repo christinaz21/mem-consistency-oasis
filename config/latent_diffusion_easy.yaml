@@ -14,9 +14,9 @@ wandb:
   mode: offline # set wandb logging to online, offline or dryrun
 
 resume: null # wandb run id to resume logging and loading checkpoint from
-load: outputs/2025-03-25/04-38-46/checkpoints/epoch=0-step=5000.ckpt # wandb run id containing checkpoint or a path to a checkpoint file
+load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: latent_diffusion_easy
+name: latent_diffusion_easy_10frames
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -40,6 +40,9 @@ experiment:
 algorithm:
   save_video_every_n_step: 2000
   warmup_steps: 1000
+
+dataset:
+  n_frames: 10
 
 model:
   precision: bf16-mixed

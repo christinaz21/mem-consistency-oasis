@@ -22,7 +22,7 @@ import os
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 assert torch.cuda.is_available()
-device = "cuda:0"
+device = "cuda"
 
 
 def main(args):

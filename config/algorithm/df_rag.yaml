@@ -1,6 +1,5 @@
 debug: ${debug} # inherited from configurations/config.yaml
 lr: ${experiment.training.lr}
-mem_beta_lr: 3e-3
 
 # dataset-dependent configurations
 x_shape: ${model.observation_shape}
@@ -10,7 +9,7 @@ external_cond_dim: ${dataset.external_cond_dim}
 context_frames: ${dataset.context_length}
 chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion chunk size
 
-n_frames: ${dataset.n_frames}
+n_frames: 20
 frame_skip: ${dataset.frame_skip}
 
 vae_name: oasis
@@ -22,9 +21,12 @@ weight_decay: 2e-3
 warmup_steps: 10000
 optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
-gradient_checkpointing: true
 
-save_video_every_n_step: 3000 # save a video every n train steps
+save_video_every_n_step: 1000 # save a video every n train steps
+
+rag_weight: [10, 10, 10, 3]
+similarity_func: euclidean
+retrieve_num: 10
 
 diffusion:
 # training
@@ -36,6 +38,7 @@ diffusion:
   # sampling
   sampling_timesteps: 40 # fixme, numer of diffusion steps, should be increased
   stabilization_level: 15
+  predict_v: true
 
 metrics:
   - nothing

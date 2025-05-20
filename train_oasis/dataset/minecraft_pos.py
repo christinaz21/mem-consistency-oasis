@@ -115,7 +115,14 @@ class MinecraftPosDataset(torch.utils.data.Dataset):
         video = video.contiguous().numpy()
         if self.external_cond_dim > 0:
             data = np.load(action_path)["actions"]
-            actions = data[frame_idx : frame_idx + self.n_frames, 4:]
+            if self.external_cond_dim == 4:
+                actions = data[frame_idx : frame_idx + self.n_frames, 4:]
+                actions = actions - actions[0]
+            elif self.external_cond_dim == 8:
+                actions = data[frame_idx : frame_idx + self.n_frames]
+                actions[:, 4:] = actions[:, 4:] - actions[0, 4:]
+            else:
+                raise ValueError(f"Invalid external_cond_dim: {self.external_cond_dim}")
             assert actions.shape == (self.n_frames, self.external_cond_dim), f"actions.shape={actions.shape} != (self.n_frames - 1, self.external_cond_dim), file_idx={file_idx}, frame_idx={frame_idx}"
 
         nonterminal = np.ones(self.n_frames)

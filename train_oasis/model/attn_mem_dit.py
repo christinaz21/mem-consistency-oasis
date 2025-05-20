@@ -515,8 +515,8 @@ class DiT(nn.Module):
         B = x.shape[0]
         kv_mem = None
         last_end = n_context_frames
-        pbar = tqdm(total=len(range(0, n_frames - self.max_frames + self.stride, self.stride)), desc="Inference")
-        for start, end in zip(range(0, n_frames - self.max_frames + self.stride, self.stride), range(self.max_frames, n_frames + self.stride, self.stride)):
+        pbar = tqdm(total=len(range(n_context_frames - self.stride, n_frames - self.max_frames + self.stride, self.stride)), desc="Inference")
+        for start, end in zip(range(n_context_frames - self.stride, n_frames - self.max_frames + self.stride, self.stride), range(n_context_frames - self.stride + self.max_frames, n_frames + self.stride, self.stride)):
             if end > n_frames:
                 end = n_frames
             pbar.set_postfix(

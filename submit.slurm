@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=wgan           # create a short name for your job
+#SBATCH --job-name=rag           # create a short name for your job
 #SBATCH --partition=pli
 #SBATCH --account=oasis
 #SBATCH --nodes=1                # node count
@@ -7,13 +7,12 @@
 #SBATCH --cpus-per-task=96       # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --mem=960G
 #SBATCH --gres=gpu:8             # number of gpus per node
-#SBATCH --time=28:00:00          # total run time limit (HH:MM:SS)
-#SBATCH --output=outputs/logs/wgan-%J.log
-#SBATCH --error=outputs/logs/wgan-%J.log
+#SBATCH --time=24:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --output=outputs/logs/rag-%J.log
+#SBATCH --error=outputs/logs/rag-%J.log
 
 module purge
 module load anaconda3/2024.6
 conda activate oasis
-echo "gcc version: $(gcc --version)"
 
-torchrun --nnodes=1 --nproc_per_node=8 /home/tc0786/Project/train-oasis/train_oasis/main.py --config-name=apt
+torchrun --nnodes=1 --nproc_per_node=8 /home/tc0786/Project/train-oasis/train_oasis/main.py --config-name=latent_rag

@@ -129,8 +129,6 @@ class ImageDiscriminator(nn.Module):
         depth=12,
         num_heads=16,
         mlp_ratio=4.0,
-        external_cond_dim=25,
-        max_frames=32,
         gradient_checkpointing=True,
         dtype=torch.float32,
     ):
@@ -138,7 +136,6 @@ class ImageDiscriminator(nn.Module):
         self.in_channels = in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
-        self.max_frames = max_frames
         self.gradient_checkpointing = gradient_checkpointing
         self.dtype = dtype
 
@@ -146,7 +143,6 @@ class ImageDiscriminator(nn.Module):
         frame_h, frame_w = self.x_embedder.grid_size
 
         self.spatial_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads // 2, freqs_for="pixel", max_freq=256)
-        self.external_cond = nn.Linear(external_cond_dim, hidden_size) if external_cond_dim > 0 else nn.Identity()
 
         self.blocks = nn.ModuleList(
             [
@@ -184,8 +180,7 @@ class ImageDiscriminator(nn.Module):
     def forward(self, x):
         """
         Forward pass of DiT.
-        x: (B, T, C, H, W) tensor of spatial inputs (images or latent representations of images)
-        t: (B, T,) tensor of diffusion timesteps
+        x: (B, C, H, W) tensor of spatial inputs (images or latent representations of images)
         """
         # add spatial embeddings
         x = self.x_embedder(x)  # (B, C, H, W) -> (B, H/2, W/2, D) , C = 16, D = d_model
@@ -207,4 +202,66 @@ class ImageDiscriminator(nn.Module):
         x = F.adaptive_avg_pool2d(x, (1, 1))
         
         x = x.view(x.size(0))  # 展平
+        x = F.sigmoid(x)  # (B, )
+        return x # (B, )
+
+class ResNetBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResNetBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(out_channels)
+            )
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out += self.shortcut(x)
+        out = self.relu(out)
+        return out
+
+class ImageDiscriminatorResNet(nn.Module):
+    """
+    A ResNet-based image discriminator.
+    """
+    def __init__(self):
+        super(ImageDiscriminatorResNet, self).__init__()
+
+        # (16, 18, 32) -> (16, 9, 16)
+        self.layer1 = ResNetBlock(16, 32, stride=2)
+        # (16, 9, 16) -> (32, 5, 8)
+        self.layer2 = ResNetBlock(32, 64, stride=2)
+        # (32, 5, 8) -> (64, 3, 4)
+        self.layer3 = ResNetBlock(64, 128, stride=2)
+        # (64, 3, 4) -> (128, 2, 2)
+        self.layer4 = ResNetBlock(128, 256, stride=2)
+
+        self.pooling = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(256, 1)
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, x):
+        # x: (B, C, H, W)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.pooling(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        x = x.flatten()
+        x = self.sigmoid(x)
         return x

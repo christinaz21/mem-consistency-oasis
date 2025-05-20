@@ -5,6 +5,11 @@
 3. 0224: flappy bird attention memory
 4. 0228: minecraft easy
 5. 0303: easy predict_v
+6. 0518-0314: rag multi
+7. 0518-0234: rag single
+8. 0507-0328: vanilla 10
+9. 0508-0224: world coordinate
+10. 0507-1128: infini attention
 
 
 ## TODO

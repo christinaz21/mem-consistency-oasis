@@ -4,11 +4,13 @@ from train_oasis.dataset.minecraftvideo import MinecraftVideoDataset
 from train_oasis.dataset.flappy_bird_fast import FlappyBirdFastDataset
 from train_oasis.dataset.minecraft_easy import MinecraftEasyDataset
 from train_oasis.dataset.minecraft_pos import MinecraftPosDataset
+from train_oasis.dataset.latent_pos import LatentPosDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
-from train_oasis.trainer.Image_Discriminator_Trainer import ImageDiscriminatorTrainer
 from train_oasis.trainer.DF_GAN_Trainer import DFGANVideo
 from train_oasis.trainer.SFP_Trainer import SingleFramePrediction
+from train_oasis.trainer.DF_Rag_Trainer import DiffusionForcingRagVideo
+from train_oasis.trainer.Latent_Rag_Trainer import LatentRagVideo
 
 from typing import Optional, Union
 import pathlib
@@ -36,9 +38,10 @@ class VideoPredictionExperiment:
     compatible_algorithms = dict(
         df_video=DiffusionForcingVideo,
         attn_mem_video=AttentionMemoryTrainer,
-        img_dis=ImageDiscriminatorTrainer,
         df_gan=DFGANVideo,
         sfp=SingleFramePrediction,
+        df_rag=DiffusionForcingRagVideo,
+        latent_rag=LatentRagVideo,
     )
 
     compatible_datasets = dict(
@@ -49,6 +52,7 @@ class VideoPredictionExperiment:
         flappy_bird_fast=FlappyBirdFastDataset,
         minecraft_easy=MinecraftEasyDataset,
         minecraft_pos=MinecraftPosDataset,
+        latent_pos=LatentPosDataset,
     )
 
     def __init__(
@@ -149,7 +153,7 @@ class VideoPredictionExperiment:
                 shuffle=shuffle,
                 persistent_workers=True if self.cfg.training.data.num_workers > 0 else False,
                 drop_last=True,
-                pin_memory=True,
+                pin_memory=False,
                 # prefetch_factor=8, # pre-load 8 * 32 data points, equal to 32 batch
             )
         else:

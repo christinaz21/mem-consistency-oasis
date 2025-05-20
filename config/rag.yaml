@@ -2,7 +2,7 @@
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: minecraft_pos # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - algorithm: df_rag # algorithm yaml file name in configurations/algorithm folder [fixme]
   - model: dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
@@ -14,12 +14,12 @@ wandb:
   mode: offline # set wandb logging to online, offline or dryrun
 
 resume: null # wandb run id to resume logging and loading checkpoint from
-load: null # wandb run id containing checkpoint or a path to a checkpoint file
+load: outputs/2025-05-08/11-41-18/checkpoints/epoch=0-step=4000.ckpt # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: latent_diffusion_pos
+name: rag
 
 experiment:
-  seed: 4242
+  seed: 42
   model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
@@ -47,4 +47,5 @@ model:
 
 dataset:
   external_cond_dim: 8
-  train_limit: 1063800
+  train_limit: 1027800
+  n_frames: 60

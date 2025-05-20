@@ -1,0 +1,11 @@
+debug: ${debug} # inherited from configurations/config.yaml
+
+n_frames: 100 # TODO: increase later
+metadata:
+  - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata.json
+  - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata_mem.json
+  - /home/tc0786/Project/train-oasis/data/mem_encoded_data/normal.json
+limit_video_length:
+  - null
+  - null
+  - null
