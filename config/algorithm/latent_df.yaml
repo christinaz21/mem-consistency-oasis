@@ -3,8 +3,7 @@ lr: ${experiment.training.lr}
 
 # dataset-dependent configurations
 x_shape: ${model.observation_shape}
-external_cond_dim: 8
-chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion chunk size
+external_cond_dim: 4
 
 n_frames: 20
 
@@ -13,14 +12,6 @@ weight_decay: 2e-3
 warmup_steps: 10000
 optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
-
-rag_weight: [10, 10, 10, 3]
-similarity_func: euclidean
-retrieve_num: 10
-retrieve_noise_level: 200
-
-retrieve_strategy: single
-loss_strategy: single
 
 scheduler: cosine # cosine, warmup
 

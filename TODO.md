@@ -10,7 +10,9 @@
 8. 0507-0328: vanilla 10
 9. 0508-0224: world coordinate
 10. 0507-1128: infini attention
-
+11. 0522-0646: small lr
+12. 0523-0751: vanilla 20
+13. 0523-1031: world coordinate
 
 ## TODO
 

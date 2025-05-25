@@ -147,7 +147,7 @@ def evaluate():
         model = model.to(device).to(dtype).eval()
         image_discriminators[name] = model
 
-    model_names = ["vanilla_20"] # ["yarn", "historical_buffer", "rag", "infini_attn", "vanilla_10", "vanilla_20", "world_coordinate"]
+    model_names = ["rag_multi", "rag"] # ["yarn", "historical_buffer", "rag", "infini_attn", "vanilla_10", "vanilla_20", "world_coordinate"]
     eval_split = ["memory", "random"]
 
     gt_file_path = "/home/tc0786/Project/train-oasis/data/eval_data/paths.json"

@@ -11,6 +11,8 @@ from train_oasis.trainer.DF_GAN_Trainer import DFGANVideo
 from train_oasis.trainer.SFP_Trainer import SingleFramePrediction
 from train_oasis.trainer.DF_Rag_Trainer import DiffusionForcingRagVideo
 from train_oasis.trainer.Latent_Rag_Trainer import LatentRagVideo
+from train_oasis.trainer.Latent_DF_Trainer import LatentDFVideo
+
 
 from typing import Optional, Union
 import pathlib
@@ -42,6 +44,7 @@ class VideoPredictionExperiment:
         sfp=SingleFramePrediction,
         df_rag=DiffusionForcingRagVideo,
         latent_rag=LatentRagVideo,
+        latent_df=LatentDFVideo,
     )
 
     compatible_datasets = dict(

@@ -56,7 +56,8 @@ def run_local(cfg: DictConfig):
     
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     # os.environ["HYDRA_FULL_ERROR"] = "1"
-    # os.environ["NCCL_P2P_DISABLE"] = "1"
+    os.environ["NCCL_P2P_DISABLE"] = "1"
+    # os.environ["NCCL_DEBUG"] = "INFO"
 
     # Get yaml names
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

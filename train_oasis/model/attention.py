@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from einops import rearrange
-from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
+from train_oasis.model.rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 
 
 class TemporalAxialAttention(nn.Module):

@@ -2,8 +2,8 @@
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: latent_pos # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: latent_rag # algorithm yaml file name in configurations/algorithm folder [fixme]
-  - model: rag_dit # model yaml file name in configurations/model folder [fixme]
+  - algorithm: latent_df # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: action_dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
@@ -16,14 +16,13 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: latent_rag_multiple_small_lr
+name: world_coordinate
 
 experiment:
   seed: 42
-  model_ckpt: outputs/2025-05-18/03-14-16/checkpoints/epoch=1-step=10000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
-    lr: 2e-5
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
@@ -41,16 +40,10 @@ experiment:
   
 algorithm:
   warmup_steps: 1000
-  retrieve_strategy: multiple
-  loss_strategy: multiple
 
 model:
   precision: bf16-mixed
 
 dataset:
-  metadata:
-    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata.json
-    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata_mem.json
-  limit_video_length:
-    - 2000
-    - null
+  n_frames: 20
+  action_type: both

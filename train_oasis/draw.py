@@ -3,11 +3,12 @@ import numpy as np
 import json
 import os
 import cv2
-
+import seaborn as sns
+import wandb
 
 def draw_all():
-    models = ["vanilla_10", "vanilla_20", "world_coordinate", "infini_attn", "rag", "yarn", "historical_buffer", "rag_wo_training"]
-    metrics = ["mse", "psnr", "ssim", "uiqi", "lpips", "full_step_resnet", "small_dit", "1000_step_resnet"]
+    models = ["vanilla_10", "vanilla_20", "world_coordinate", "infini_attn", "rag", "yarn", "historical_buffer", "rag_wo_training", "rag_multi"]
+    metrics = ["mse", "psnr", "ssim", "lpips", "1000_step_resnet"]
     splits = ["memory", "random"]
     save_dir = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/figures"
 
@@ -323,11 +324,12 @@ def draw_collapse():
     metrics = ["ssim", "psnr", "lpips", "1000_step_resnet"]
     metrics_name = ["SSIM", "PSNR", "LPIPS", "Discriminator"]
     selected_idx = [0, 270, 540, 810, 1080]
-    path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/vanilla_20/random/000002.mp4"
+    # path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/vanilla_20/random/000002.mp4"
     result_path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/vanilla_20/random.json"
     with open(result_path, "r") as f:
         data = json.load(f)
 
+    plt.rcParams["font.size"] = 24
     plt.figure(figsize=(30, 10))
     def smooth(x, half_window=5):
         l = len(x)
@@ -348,12 +350,11 @@ def draw_collapse():
         values = smooth(values, 10)
         plt.plot(values, label=metric_name)
     for idx in selected_idx:
-        plt.axvline(x=idx, color='k', linestyle='--', linewidth=1)
-    plt.rcParams["font.size"] = 18
-    plt.title(f"Collapse")
-    plt.xlabel("Sample Index")
+        plt.axvline(x=idx, color='k', linestyle='--', linewidth=3)
+    plt.title("Metrics", fontsize=30)
+    plt.xlabel("Sample Index", fontsize=30)
     plt.xlim(-10, 1090)
-    plt.ylabel("Metric Value")
+    plt.ylabel("Metric Value", fontsize=30)
     plt.legend()
     plt.grid()
     save_path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/figures/collapse/metric.png"
@@ -379,7 +380,10 @@ def draw_collapse_pic():
     fig, axes = plt.subplots(1, len(frame_idxs), figsize=(30, 10))
     for i, frame in enumerate(frames):
         axes[i].imshow(frame)
-        axes[i].axis("off")
+        axes[i].set_xlabel(f"Frame {frame_idxs[i]}", fontsize=24)
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+        axes[i].set_frame_on(False)
     fig.subplots_adjust(wspace=0.02)
 
     save_path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/figures/collapse/real.png"
@@ -669,16 +673,181 @@ def draw_select():
         plt.savefig(save_path, bbox_inches="tight")
         plt.clf()
 
+def draw_ablation_yarn():
+    sns.set_theme(style="whitegrid")  # Set Seaborn theme
+
+    models = ["yarn", "vanilla_40_direct_extrapolate"]
+    model_names = ["YaRN", "DF(window 40)"]
+    # models = ["vanilla_10", "vanilla_20", "rag", "yarn", "historical_buffer"]
+    # model_names = ["DF(window 10)", "DF(window 20)", "VRAG", "YaRN", "History Buffer"]
+    metrics = ["ssim", "lpips", "psnr"]
+    splits = ["memory", "random"]
+    save_dir = "/scratch/gpfs/CHIJ/taiye/outputs/figures/ablation/yarn"
+    # save_dir = "/scratch/gpfs/CHIJ/taiye/outputs/draw_figs/compounding_error"
+
+    for split in splits:
+        if split == "memory":
+            limit = 300
+            smoothing_window = 2   # 2 for world coherence, 10 for compounding error
+ 
+        elif split == "random":
+            limit = 1200
+            smoothing_window = 10
+        else:
+            raise ValueError(f"Unknown split: {split}")
+
+        for metric in metrics:
+            plt.figure(figsize=(10, 4))
+            for model, model_name in zip(models, model_names):
+                json_path = f"/scratch/gpfs/CHIJ/taiye/outputs/{model}/{split}.json"
+                with open(json_path, "r") as f:
+                    data = json.load(f)
+                values = []
+                for item in data:
+                    values.append(item["output_dict"][metric][100:limit])
+                values = np.array(values)  # (b, t)
+                values = values.mean(axis=0)
+                # Apply smoothing with configurable window size
+                smoothed_values = np.convolve(values, np.ones(smoothing_window)/smoothing_window, mode='valid')
+                sns.lineplot(x=np.arange(len(smoothed_values)), y=smoothed_values, label=model_name, linewidth=3.5)
+
+            # plt.title(f"World Coherence ({metric.upper()})", fontsize=18)
+            plt.xlabel("Frame Index", fontsize=24)
+            plt.ylabel(metric.upper(), fontsize=24)
+            plt.xticks(fontsize=20)
+            plt.yticks(fontsize=20)
+            # plt.legend(fontsize=2)
+            plt.legend(fontsize=14, loc="lower right")
+            plt.grid(True)
+            
+            # Add arrow to x-axis
+            ax = plt.gca()
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['left'].set_visible(True)
+            ax.spines['bottom'].set_visible(True)
+            
+            # Add larger arrow to x-axis
+            ax.annotate('', xy=(1.02, 0), xytext=(-0.02, 0),
+                       xycoords=('axes fraction', 'axes fraction'),
+                       textcoords=('axes fraction', 'axes fraction'),
+                       arrowprops=dict(arrowstyle='->', color='black', lw=3, 
+                                     mutation_scale=20))
+            
+            # Set x-axis to start from 0 and offset ticks by 100
+            plt.xlim(left=0)
+            current_ticks = ax.get_xticks()
+            ax.set_xticklabels([int(tick + 100) for tick in current_ticks])
+            
+            save_path = os.path.join(save_dir, f"{split}_{metric}.png")
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            plt.savefig(save_path, bbox_inches="tight", dpi=300)
+            plt.close()
+
+def draw_ablation_yarn_pic():
+    relative_paths = [f"random/{i:06d}.mp4" for i in range(20)]
+
+    for idx, relative_path in enumerate(relative_paths):
+        save_file_name = relative_path.replace("mp4", "png")
+        print(save_file_name)
+        gt_video = f"/home/tc0786/Project/train-oasis/data/eval_data/{relative_path}"
+        save_path = f"/home/tc0786/Project/train-oasis/outputs/eval_outputs/figures/ablation/yarn_real_image/{idx:06d}.png"
+
+        model_names = ["yarn", "vanilla_40_direct_extrapolate"]
+        model_labels = ["YaRN", "DF(window 40)"]
+
+        skip = 300
+        frame_idxs = [100+i*skip for i in range(4)]
+        
+        fig, axes = plt.subplots(len(model_names) + 1, 4, figsize=(24, 10))
+
+        for model_idx, (model_name, model_label) in enumerate(zip(model_names, model_labels)):
+            target_video = f"/home/tc0786/Project/train-oasis/outputs/eval_outputs/{model_name}/{relative_path}"
+            cap = cv2.VideoCapture(target_video)
+            frames = []
+            for idx in frame_idxs:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if ret:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frames.append(frame)
+                else:
+                    raise ValueError(f"Failed to read frame {idx} from {target_video}")
+            cap.release()
+
+            for i, frame in enumerate(frames):
+                axes[model_idx, i].imshow(frame)
+                # 先设置ylabel再关闭轴
+                if i == 0:
+                    axes[model_idx, i].set_ylabel(model_label, fontsize=24)
+                axes[model_idx, i].set_xticks([])
+                axes[model_idx, i].set_yticks([])
+                axes[model_idx, i].set_frame_on(False)  # 替代axis("off")
+
+        # Process ground truth video
+        cap = cv2.VideoCapture(gt_video)
+        gt_frames = []
+        for idx in frame_idxs:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                gt_frames.append(frame)
+            else:
+                raise ValueError(f"Failed to read frame {idx} from {gt_video}")
+        cap.release()
+
+        for i, frame in enumerate(gt_frames):
+            axes[-1, i].imshow(frame)
+            if i == 0:
+                axes[-1, i].set_ylabel("GT", fontsize=24)
+            axes[-1, i].set_xlabel(f"Frame {frame_idxs[i]}", fontsize=24)
+            axes[-1, i].set_xticks([])
+            axes[-1, i].set_yticks([])
+            axes[-1, i].set_frame_on(False)
+
+        plt.tight_layout()
+        fig.subplots_adjust(left=0.1, wspace=0.02, hspace=0.02)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, bbox_inches="tight")
+        plt.clf()
+
+def draw_loss_curve():
+    # 你需要填写这三个run id
+    run_ids = [
+        "v1kv0n5a",
+        "29sgfy5t",
+        "h01pmba7",
+    ]
+    run_names = [
+        "DF(window 20)",
+        "VRAG (no memory)",
+        "Neural Memory",
+    ]
+    project = "appendix"
+
+    metric = "training/loss" # 你要画的loss曲线名
+
+    plt.figure(figsize=(10, 6))
+    for run_id, run_name in zip(run_ids, run_names):
+        api = wandb.Api()
+        run = api.run(f"{project}/{run_id}")
+        history = run.history(samples=10000)  # 下载所有step的历史
+        values = history[metric]
+        indices = values.index[~values.isna()]
+        values = values.dropna().values
+        plt.plot(indices, values, label=run_name)
+
+    plt.xlim(-1, 1201)
+    plt.xlabel("Training Step")
+    plt.ylabel("Loss")
+    plt.title("Loss Curve")
+    plt.legend()
+    plt.grid()
+    save_path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/figures/loss_curve.png"
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
+
 if __name__ == "__main__":
-    # draw_one()
-    # print_table()
-    # draw_ablation_predx()
-    # draw_ablation_rag_training()
-    # draw_pic_random()
-    # draw_collapse()
-    # draw_collapse_pic()
-    # find_similar()
-    # find_similar_2()
-    # draw_one_fig()
-    draw_select_random()
-    # draw_pic_memory()
+    draw_all()

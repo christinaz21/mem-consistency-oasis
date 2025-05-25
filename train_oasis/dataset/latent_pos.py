@@ -21,6 +21,8 @@ class LatentPosDataset(torch.utils.data.Dataset):
         if split == "validation":
             return
         self.n_frames = cfg.n_frames
+        self.pre_load = cfg.pre_load
+        self.action_type = cfg.action_type
 
         self.metadata_paths = cfg.metadata
         self.limit_video_lengths = cfg.limit_video_length
@@ -44,13 +46,17 @@ class LatentPosDataset(torch.utils.data.Dataset):
                 if not video_path.exists():
                     raise FileNotFoundError(f"Video file not found: {video_path}")
 
-                actions = np.load(action_path)["actions"]
-                actions = torch.from_numpy(actions).float()
-                self.actions.append(actions)
-                video = torch.load(video_path, map_location="cpu", weights_only=True)
-                self.videos.append(video)
-                if video.shape[0] != actions.shape[0]:
-                    raise ValueError(f"Video and action lengths do not match: {video.shape[0]} != {actions.shape[0]}")
+                if self.pre_load:
+                    actions = np.load(action_path)["actions"]
+                    actions = torch.from_numpy(actions).float()
+                    self.actions.append(actions)
+                    video = torch.load(video_path, map_location="cpu", weights_only=True)
+                    self.videos.append(video)
+                    if video.shape[0] != actions.shape[0]:
+                        raise ValueError(f"Video and action lengths do not match: {video.shape[0]} != {actions.shape[0]}")
+                else:
+                    self.actions.append(action_path)
+                    self.videos.append(video_path)
 
         self.lengths = np.array(self.lengths)
         self.clips_per_video = np.clip(self.lengths - self.n_frames + 1, a_min=1, a_max=None).astype(
@@ -79,14 +85,31 @@ class LatentPosDataset(torch.utils.data.Dataset):
     def getitem(self, idx):
         file_idx, frame_idx = self.split_idx(idx)
 
-        actions = self.actions[file_idx][frame_idx : frame_idx + self.n_frames]
+        if self.pre_load:
+            actions = self.actions[file_idx][frame_idx : frame_idx + self.n_frames]
+            video = self.videos[file_idx][frame_idx : frame_idx + self.n_frames]
+        else:
+            action_path = self.actions[file_idx]
+            video_path = self.videos[file_idx]
+            actions = np.load(action_path)["actions"]
+            actions = torch.from_numpy(actions).float()
+            actions = actions[frame_idx : frame_idx + self.n_frames]
+            video = torch.load(video_path, map_location="cpu", weights_only=True)
+            video = video[frame_idx : frame_idx + self.n_frames]
         actions[:, 4:] = actions[:, 4:] - actions[0, 4:]
-        video = self.videos[file_idx][frame_idx : frame_idx + self.n_frames]
         nonterminal = np.ones(self.n_frames)
 
         assert actions.shape == (self.n_frames, 8), f"actions.shape={actions.shape} != (self.n_frames - 1, self.external_cond_dim), file_idx={file_idx}, frame_idx={frame_idx}"
         assert video.shape[0] == self.n_frames, f"video.shape[0]={video.shape[0]} != self.n_frames"
 
+        if self.action_type == "action":
+            actions = actions[:, :4]
+        elif self.action_type == "pos":
+            actions = actions[:, 4:]
+        elif self.action_type == "both":
+            actions = actions
+        else:
+            raise ValueError(f"Unknown action type: {self.action_type}")
         return (
             video,
             actions,

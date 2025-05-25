@@ -29,19 +29,13 @@ from deepspeed.ops.adam import DeepSpeedCPUAdam
 import torch.distributed as dist
 from transformers import get_cosine_schedule_with_warmup
 
-class LatentRagVideo(pl.LightningModule):
+class LatentDFVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
-        self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
-        self.similarity_func = cfg.similarity_func
-        self.retrieve_num = cfg.retrieve_num
-        self.retrieve_noise_level = cfg.retrieve_noise_level
-        self.retrieve_strategy = cfg.retrieve_strategy # "single" or "multiple"
-        self.loss_strategy = cfg.loss_strategy # "single" or "multiple"
         self.scheduler = cfg.scheduler
 
         self.timesteps = cfg.diffusion.timesteps
@@ -62,22 +56,40 @@ class LatentRagVideo(pl.LightningModule):
         self._build_buffer()
 
     def _build_model(self, model_ckpt):
-        from train_oasis.model.rag_dit import DiT
-        self.diffusion_model = DiT(
-            input_h=self.model_cfg.input_h,
-            input_w=self.model_cfg.input_w,
-            patch_size=self.model_cfg.patch_size,
-            in_channels=self.model_cfg.in_channels,
-            hidden_size=self.model_cfg.hidden_size,
-            depth=self.model_cfg.depth,
-            num_heads=self.model_cfg.num_heads,
-            mlp_ratio=self.model_cfg.mlp_ratio,
-            external_cond_dim=self.external_cond_dim,
-            max_frames=self.cfg.n_frames,
-            retrieve_num=self.retrieve_num,
-            gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-            dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-        )
+        if self.model_cfg.architecture == "oasis_dit":
+            from train_oasis.model.dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        elif self.model_cfg.architecture == "action_dit":
+            from train_oasis.model.action_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        else:
+            raise ValueError(f"Unsupported architecture {self.model_cfg.architecture}.")
         
         if model_ckpt:
             print(f"Loading Diffusion model from {model_ckpt}")
@@ -94,7 +106,6 @@ class LatentRagVideo(pl.LightningModule):
 
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
 
-        register_buffer("rag_weight", torch.tensor(self.cfg.rag_weight).reshape(1, 1, 4))
         betas = sigmoid_beta_schedule(self.timesteps).float()
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
@@ -156,7 +167,12 @@ class LatentRagVideo(pl.LightningModule):
         optimizer.step(closure=optimizer_closure)
 
     def lr_scheduler_step(self, scheduler, metric):
-        scheduler.step(step=self.trainer.global_step)
+        if self.scheduler == "cosine":
+            scheduler.step()
+        elif self.scheduler == "warmup":
+            scheduler.step(self.trainer.global_step)
+        else:
+            raise ValueError(f"Unsupported scheduler {self.scheduler}.")
 
     def compute_loss_weights(self, noise_levels: torch.Tensor):
         snr = self.snr[noise_levels]
@@ -230,16 +246,12 @@ class LatentRagVideo(pl.LightningModule):
             loss_weight = self.compute_loss_weights(noise_levels)
             loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
             loss = loss * loss_weight
-            if self.loss_strategy == "multiple":
-                masks[:self.retrieve_num] = 0
-            elif self.loss_strategy == "single":
-                masks[:-1] = 0
-            else:
-                raise ValueError(f"Unsupported loss strategy {self.loss_strategy}.")
             loss = self.reweight_loss(loss, masks)
         
         # log the loss
         self.log("training/loss", loss, sync_dist=True, prog_bar=True)
+        self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=False)
+        self.log("training/lr", self.trainer.optimizers[0].param_groups[0]["lr"], sync_dist=True, prog_bar=False)
 
         output_dict = {
             "loss": loss,
@@ -337,11 +349,7 @@ class LatentRagVideo(pl.LightningModule):
         Generate noise levels for training.
         """
         num_frames, batch_size, *_ = xs.shape
-        condition_frames = num_frames - self.retrieve_num
-        condition_noise_levels = torch.randint(0, self.timesteps, (condition_frames, batch_size), device=xs.device)
-        retrieve_noise_levels = torch.randint(0, self.retrieve_noise_level, (self.retrieve_num, batch_size), device=xs.device)
-        # concatenate the noise levels
-        noise_levels = torch.cat([retrieve_noise_levels, condition_noise_levels], dim=0)
+        noise_levels = torch.randint(0, self.timesteps, (num_frames, batch_size), device=xs.device)
 
         if masks is not None:
             # for frames that are not available, treat as full noise
@@ -360,99 +368,20 @@ class LatentRagVideo(pl.LightningModule):
             )
             loss = loss * weight
 
-        return loss.mean() / weight.mean()
-
-    def retrieve_frame_idx(self, actions, retrieve_num, pred_action):
-        """
-        Retrieve the frame index of the action that is most similar to the predicted action.
-        pred_action: (B, 1, action_dim)
-        actions: (B, num_actions, action_dim)
-        retrieve_num: number of actions to retrieve
-        """
-        pred_action = pred_action * self.rag_weight
-        actions = actions * self.rag_weight
-
-        if self.similarity_func == "cosine":
-            similarity = 1 - torch.nn.functional.cosine_similarity(actions, pred_action, dim=-1)
-        elif self.similarity_func == "euclidean":
-            similarity = torch.norm(actions - pred_action, dim=-1)
-        else:
-            raise ValueError(f"unsupported similarity function: {self.similarity_func}")
-        # retrieve the top-k most similar actions
-        topk_idx = torch.topk(similarity, retrieve_num, dim=-1, largest=False).indices
-        # (B, retrieve_num)
-        topk_idx, _ = torch.sort(topk_idx, dim=-1)
-        return topk_idx
-
-    def retrieve_frame_idx_multiple(self, actions, retrieve_num, pred_action):
-        """
-        Retrieve the frame index of the action that is most similar to the predicted action.
-        pred_action: (B, num_condition, action_dim)
-        actions: (B, num_actions, action_dim)
-        retrieve_num: number of actions to retrieve
-        """
-        assert pred_action.shape[1] == retrieve_num, f"pred_action shape {pred_action.shape} does not match retrieve_num {self.retrieve_num}"
-        pred_action = pred_action * self.rag_weight
-        actions = actions * self.rag_weight
-
-        pred_action = pred_action.unsqueeze(2)  # (B, R, 1, D)
-        actions = actions.unsqueeze(1)  # (B, 1, N, D)
-
-        if self.similarity_func == "cosine":
-            similarity = 1 - torch.nn.functional.cosine_similarity(actions, pred_action, dim=-1)
-        elif self.similarity_func == "euclidean":
-            similarity = torch.norm(actions - pred_action, dim=-1)
-        else:
-            raise ValueError(f"unsupported similarity function: {self.similarity_func}")
-        # similarity: (B, R, N)
-        # retrieve the top-k most similar actions
-        topk_idx = torch.topk(similarity, 1, dim=-1, largest=False).indices.squeeze(-1)  # (B, R)
-        # (B, retrieve_num)
-        topk_idx, _ = torch.sort(topk_idx, dim=-1)
-        return topk_idx
+        return loss.mean()
 
     def _preprocess_batch(self, batch):
         xs = batch[0]
         batch_size, n_frames, c, h, w = xs.shape
 
-        conditions = batch[1]
-        conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
+        masks = torch.ones(n_frames, batch_size).to(self.device)
 
-        retrieve_actions = conditions[:, :-(self.n_frames-self.retrieve_num), 4:]
-        if self.retrieve_strategy == "single":
-            pred_action = conditions[:, -1, 4:]
-            pred_action = pred_action.reshape(batch_size, 1, -1)
-            retrieve_idx = self.retrieve_frame_idx(retrieve_actions, self.retrieve_num, pred_action)
-        elif self.retrieve_strategy == "multiple":
-            pred_action = conditions[:, -(self.n_frames-self.retrieve_num):, 4:]
-            retrieve_idx = self.retrieve_frame_idx_multiple(retrieve_actions, self.retrieve_num, pred_action)
+        if self.external_cond_dim > 0:
+            conditions = batch[1]
+            conditions = rearrange(conditions, "b t d -> t b d").contiguous()
         else:
-            raise ValueError(f"unsupported retrieve strategy: {self.retrieve_strategy}")
-        assert retrieve_idx.shape == (batch_size, self.retrieve_num)
-
-        retrieve_actions = torch.gather(
-            retrieve_actions, 
-            1, 
-            retrieve_idx.unsqueeze(-1).expand(-1, -1, retrieve_actions.size(-1))
-        )
-        retrieve_actions = retrieve_actions.reshape(batch_size, self.retrieve_num, -1)
-        zero_actions = torch.zeros_like(retrieve_actions)
-        retrieve_actions = torch.cat([zero_actions, retrieve_actions], dim=-1)
-        conditions = torch.cat([retrieve_actions, conditions[:, -(self.n_frames-self.retrieve_num):]], dim=1)
-
-        retrieve_frames = torch.gather(
-            xs, 
-            1, 
-            retrieve_idx.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, c, h, w)
-        )
-        retrieve_frames = retrieve_frames.reshape(batch_size, self.retrieve_num, c, h, w)
-        xs = torch.cat([retrieve_frames, xs[:, -(self.n_frames-self.retrieve_num):]], dim=1)
-
-        masks = torch.ones(self.n_frames, batch_size).to(self.device)
-        conditions = rearrange(conditions, "b t d -> t b d").contiguous()
+            conditions = None
 
         xs = rearrange(xs, "b t c ... -> t b c ...").contiguous()
-        assert conditions.shape == (self.n_frames, batch_size, self.external_cond_dim)
-        assert xs.shape == (self.n_frames, batch_size, c, h, w)
 
         return xs, conditions, masks

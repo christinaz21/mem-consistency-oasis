@@ -371,13 +371,14 @@ def vanilla():
 def retrieve_frame_idx(actions, retrieve_num, pred_action, similarity_func="euclidean"):
     """
     Retrieve the frame index of the action that is most similar to the predicted action.
-    pred_action: (1, action_dim)
-    actions: (1, num_actions, action_dim)
+    pred_action: (B, action_dim)
+    actions: (B, num_actions, action_dim)
     retrieve_num: number of actions to retrieve
     """
     weights = torch.tensor([10,10,10,3], dtype=torch.float32, device=device)
-    pred_action = pred_action[0] * weights
-    actions = actions[0] * weights
+    pred_action = pred_action * weights
+    pred_action = pred_action.unsqueeze(1)  # (B, 1, D)
+    actions = actions * weights
 
     if similarity_func == "cosine":
         similarity = 1 - torch.nn.functional.cosine_similarity(actions, pred_action, dim=-1)
@@ -386,13 +387,42 @@ def retrieve_frame_idx(actions, retrieve_num, pred_action, similarity_func="eucl
     else:
         raise ValueError(f"unsupported similarity function: {similarity_func}")
     # retrieve the top-k most similar actions
+    # similarity: (B, N)
     topk_idx = torch.topk(similarity, retrieve_num, largest=False).indices
+    return topk_idx
+
+def retrieve_frame_idx_multiple(actions, retrieve_num, pred_action, similarity_func="euclidean"):
+    """
+    Retrieve the frame index of the action that is most similar to the predicted action.
+    pred_action: (B, num_condition, action_dim)
+    actions: (B, num_actions, action_dim)
+    retrieve_num: number of actions to retrieve
+    """
+    assert pred_action.shape[1] == retrieve_num, f"pred_action shape {pred_action.shape} does not match retrieve_num {retrieve_num}"
+    weights = torch.tensor([10,10,10,3], dtype=torch.float32, device=device)
+    pred_action = pred_action * weights
+    actions = actions * weights
+
+    pred_action = pred_action.unsqueeze(2)  # (B, R, 1, D)
+    actions = actions.unsqueeze(1)  # (B, 1, N, D)
+
+    if similarity_func == "cosine":
+        similarity = 1 - torch.nn.functional.cosine_similarity(actions, pred_action, dim=-1)
+    elif similarity_func == "euclidean":
+        similarity = torch.norm(actions - pred_action, dim=-1)
+    else:
+        raise ValueError(f"unsupported similarity function: {similarity_func}")
+    # similarity: (B, R, N)
+    # retrieve the top-k most similar actions
+    topk_idx = torch.topk(similarity, 1, dim=-1, largest=False).indices.squeeze(-1)  # (B, R)
+    # (B, retrieve_num)
+    topk_idx, _ = torch.sort(topk_idx, dim=-1)
     return topk_idx
 
 @torch.no_grad()
 def rag():
     ddim_noise_steps = 20
-    total_frames = 120
+    total_frames = 300
     video_offset = None
     batch_size = 10
     n_prompt_frames = 100
@@ -402,12 +432,16 @@ def rag():
 
     inference_splits = ["memory", "random"]
 
-    model_name = "rag_wo_training" # "rag_wo_training" "rag"
+    model_name = "rag" # "rag_wo_training" "rag" "rag_multi"
 
     if model_name == "rag":
         oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-12/12-57-27/checkpoints/epoch=2-step=12000.ckpt"
     elif model_name == "rag_wo_training":
         oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-08/02-24-21/checkpoints/epoch=2-step=6000.ckpt"
+    elif model_name == "rag_multi":
+        oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-18/03-14-16/checkpoints/epoch=1-step=10000.ckpt"
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
     window_size = 20
     vae_ckpt = "/home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors"
 
@@ -418,7 +452,7 @@ def rag():
     torch.cuda.manual_seed(0)
 
     # load DiT checkpoint
-    if model_name == "rag":
+    if model_name == "rag" or model_name == "rag_multi":
         from train_oasis.model.rag_dit import DiT
         model = DiT(
             input_h=18,
@@ -541,14 +575,24 @@ def rag():
                     # retrieve actions
                     context_frame = start_frame + retrieve_num
                     candidate_actions = actions[:, :context_frame, 4:]
-                    retrieved_idx = retrieve_frame_idx(
-                        candidate_actions,
-                        retrieve_num=retrieve_num,
-                        pred_action=actions[:, i, 4:],
-                        similarity_func="euclidean",
-                    )
-                    retrieved_actions = actions[:, retrieved_idx]
-                    retrieved_frames = x[:, retrieved_idx]
+                    if model_name == "rag_multi":
+                        retrieved_idx = retrieve_frame_idx_multiple(
+                            candidate_actions,
+                            retrieve_num=retrieve_num,
+                            pred_action=actions[:, context_frame:i+1, 4:],
+                            similarity_func="euclidean",
+                        )
+                    else:
+                        retrieved_idx = retrieve_frame_idx(
+                            candidate_actions,
+                            retrieve_num=retrieve_num,
+                            pred_action=actions[:, i, 4:],
+                            similarity_func="euclidean",
+                        )
+                    batch_indices = torch.arange(actions.shape[0], device=actions.device).unsqueeze(-1).expand(-1, retrieved_idx.shape[1])
+                    retrieved_actions = actions[batch_indices, retrieved_idx]
+                    # retrieved_actions = actions[:, retrieved_idx]
+                    retrieved_frames = x[batch_indices, retrieved_idx]
                     retrieved_actions[:, :, :4] = 0
                     context_actions = torch.cat([retrieved_actions, actions[:, context_frame:i+1]], dim=1)
                     context_frames = torch.cat([retrieved_frames, x[:, context_frame:i]], dim=1)
@@ -982,5 +1026,5 @@ def check_length():
         print(actions.shape)
 
 if __name__ == "__main__":
-    rag_folder()
+    rag()
     # check_length()

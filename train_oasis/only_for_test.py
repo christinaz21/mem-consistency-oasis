@@ -1,25 +1,19 @@
+from model.rotary_embedding_torch import RotaryEmbedding
 import torch
 
-pred_action = torch.randn(2, 4, 5)  # (B, R, D)
-actions = torch.randn(2, 40, 5)  # (B, N, D)
-similarity_func = "euclidean"
-retrieve_num = 4
 
-pred_action = pred_action.unsqueeze(2)  # (B, R, 1, D)
-actions = actions.unsqueeze(1)  # (B, 1, N, D)
+q = torch.ones(1, 1, 12, 8)
+k = torch.ones(1, 1, 12, 8)
 
-if similarity_func == "cosine":
-    similarity = 1 - torch.nn.functional.cosine_similarity(actions, pred_action, dim=-1)
-elif similarity_func == "euclidean":
-    similarity = torch.norm(actions - pred_action, dim=-1)
-print(similarity.shape)  # (B, R, N)
+print(q.dtype)
 
-# retrieve the top-k most similar actions
-topk_idx = torch.topk(similarity, 1, dim=-1, largest=False).indices.squeeze(-1)  # (B, R)
-print(topk_idx.shape)  # (B, R)
+rope = RotaryEmbedding(dim=8)
+print(rope.freqs)
+q = rope.rotate_queries_or_keys(q, rope.freqs)
+k = rope.rotate_queries_or_keys(k, rope.freqs)
 
-# (B, retrieve_num)
-topk_idx, _ = torch.sort(topk_idx, dim=-1)
+print(q.shape)
+print(k.shape)
 
-print(topk_idx.shape)  # (B, R)
-print(topk_idx)  # (B, R)
+print(q)
+print(k)
