@@ -1,19 +1,20 @@
 debug: ${debug} # inherited from configurations/config.yaml
 lr: ${experiment.training.lr}
-mem_beta_lr: 1e-3
 
 # dataset-dependent configurations
 x_shape: ${model.observation_shape}
 external_cond_dim: 4
 
-n_frames: ${dataset.n_frames}
+n_frames: 10
+clean_frames: 9
+predict_frames: 1
 
 # training hyperparameters
 weight_decay: 2e-3
-warmup_steps: 2000
+warmup_steps: 10000
 optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
-gradient_checkpointing: true
+
 scheduler: cosine # cosine, warmup
 
 diffusion:
@@ -26,6 +27,7 @@ diffusion:
   # sampling
   sampling_timesteps: 40 # fixme, numer of diffusion steps, should be increased
   stabilization_level: 15
+  predict_v: true
 
 metrics:
   - nothing

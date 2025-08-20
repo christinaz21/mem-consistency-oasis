@@ -81,7 +81,7 @@ def draw_one():
             plt.close()
 
 def print_table():
-    models = ["rag", "rag_wo_training", "world_coordinate"] # ["vanilla_10", "vanilla_20", "world_coordinate", "infini_attn", "rag", "yarn", "historical_buffer", "rag_wo_training"]
+    models = ["vanilla_20", "rag_pred_pose", "rag_multi_pred_pose", "rag", "rag_multi"] # ["vanilla_10", "vanilla_20", "world_coordinate", "infini_attn", "rag", "yarn", "historical_buffer", "rag_wo_training"]
     metrics = ["ssim", "psnr", "lpips"] # ["mse", "psnr", "ssim", "uiqi", "lpips", "fid", "full_step_resnet", "small_dit", "1000_step_resnet"]
     splits = ["memory"] # ["memory", "random"]
 
@@ -849,5 +849,23 @@ def draw_loss_curve():
     plt.savefig(save_path, bbox_inches="tight")
     plt.close()
 
+def draw_fov():
+    import time
+    import cv2
+    save_video_path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/figures/fov.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(save_video_path, fourcc, 20.0, (256, 256))
+    for i in range(300):
+        img = np.zeros((256, 256, 3), dtype=np.uint8)
+        out.write(img)
+    out.release()
+    action_path = "/home/tc0786/Project/train-oasis/data/mc_mem_data/0/000000.npz"
+    action_data = np.load(action_path)["actions"]
+    start_time = time.time()
+
+    for idx in range(100, 1200):
+        target_action = action_data[idx]
+        candidates = action_data[:idx]
+
 if __name__ == "__main__":
-    draw_all()
+    print_table()

@@ -54,43 +54,72 @@ class TemporalAxialAttention(nn.Module):
         rotary_emb: RotaryEmbedding,
         is_causal: bool = True,
         attn_drop: float = 0.0,
-        pos_embed_dim: int = 8,
+        retrieve_num: int = 10,
+        pos_emb_strategy: str = "add",
+        total_pos_emb_dim: int = 3,
     ):
         super().__init__()
         self.inner_dim = dim_head * heads
         self.heads = heads
         self.head_dim = dim_head
         self.inner_dim = dim_head * heads
-        self.pos_embed_dim = pos_embed_dim
         self.to_qkv = nn.Linear(dim, self.inner_dim * 3, bias=False)
-        pos_output_dim = pos_embed_dim * 2 * 4 + 4
-        self.to_embed = nn.Linear(pos_output_dim, self.inner_dim, bias=False)
         self.to_out = nn.Linear(self.inner_dim, dim)
+
+        assert pos_emb_strategy in ["add", "concat"], "pos_emb_strategy must be either 'add' or 'concat'"
+        self.pos_emb_strategy = pos_emb_strategy
+        self.total_pos_emb_dim = total_pos_emb_dim
+        if pos_emb_strategy == "add":
+            self.pos_emb_linear = nn.Linear(total_pos_emb_dim, dim_head * heads, bias=False)
 
         self.rotary_emb = rotary_emb
         self.is_causal = is_causal
 
         self.attn_drop = attn_drop
         self.scale = self.head_dim**-0.5
+        self.retrieve_num = retrieve_num
+        self.offset = 100
 
     def forward(self, x: torch.Tensor, pos_emb: torch.Tensor):
         B, T, H, W, D = x.shape
 
         q, k, v = self.to_qkv(x).chunk(3, dim=-1)
 
-        new_pos_emb = self.to_embed(pos_emb)
-        new_pos_emb = new_pos_emb[:, :, None, None]  # (B, T, D) -> (B, T, 1, 1, D)
-        new_pos_emb = new_pos_emb.expand(B, T, H, W, -1)  # (B, T, 1, 1, D) -> (B, T, H, W, D)
-        new_pos_emb = rearrange(new_pos_emb, "B T H W (h d) -> (B H W) h T d", B=B, T=T, H=H, W=W, h=self.heads, d=self.head_dim)
+        if self.pos_emb_strategy == "add":
+            pos_emb = self.pos_emb_linear(pos_emb) # (B, T, D)
+            pos_emb = pos_emb.unsqueeze(2).unsqueeze(3)  # (B, T, 1, 1, D)
+            pos_emb = pos_emb.expand(B, T, H, W, self.heads * self.head_dim)
+            # q += pos_emb
+            # k += pos_emb
+            q = q + pos_emb
+            k = k + pos_emb
 
         q = rearrange(q, "B T H W (h d) -> (B H W) h T d", h=self.heads)
         k = rearrange(k, "B T H W (h d) -> (B H W) h T d", h=self.heads)
         v = rearrange(v, "B T H W (h d) -> (B H W) h T d", h=self.heads)
-        q += new_pos_emb
-        k += new_pos_emb
 
-        q = self.rotary_emb.rotate_queries_or_keys(q, self.rotary_emb.freqs)
-        k = self.rotary_emb.rotate_queries_or_keys(k, self.rotary_emb.freqs)
+        if self.pos_emb_strategy == "concat":
+            # (B, T, C)
+            pos_emb = pos_emb.unsqueeze(2)  # (B, T, 1, C)
+            pos_emb = pos_emb.expand(B, T, H * W * self.heads, self.total_pos_emb_dim)
+            pos_emb = rearrange(pos_emb, "B T (M h) d -> (B M) h T d", B=B, T=T, M=H*W, h=self.heads)
+            q = torch.cat([q, pos_emb], dim=-1)
+            k = torch.cat([k, pos_emb], dim=-1)
+
+        retrieve_q = q[:, :, :self.retrieve_num, :]
+        retrieve_k = k[:, :, :self.retrieve_num, :]
+        condition_q = q[:, :, self.retrieve_num:, :]
+        condition_k = k[:, :, self.retrieve_num:, :]
+
+        retrieve_q = self.rotary_emb.rotate_queries_or_keys(retrieve_q, self.rotary_emb.freqs, offset=self.offset)
+        retrieve_k = self.rotary_emb.rotate_queries_or_keys(retrieve_k, self.rotary_emb.freqs, offset=self.offset)
+        condition_q = self.rotary_emb.rotate_queries_or_keys(condition_q, self.rotary_emb.freqs)
+        condition_k = self.rotary_emb.rotate_queries_or_keys(condition_k, self.rotary_emb.freqs)
+
+        q = torch.cat([retrieve_q, condition_q], dim=2)
+        k = torch.cat([retrieve_k, condition_k], dim=2)
+        # q = self.rotary_emb.rotate_queries_or_keys(q, self.rotary_emb.freqs)
+        # k = self.rotary_emb.rotate_queries_or_keys(k, self.rotary_emb.freqs)
 
         q, k, v = map(lambda t: t.contiguous(), (q, k, v))
         x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=self.is_causal)
@@ -111,10 +140,13 @@ class SpatioTemporalDiTBlock(nn.Module):
         is_causal=True,
         spatial_rotary_emb: Optional[RotaryEmbedding] = None,
         temporal_rotary_emb: Optional[RotaryEmbedding] = None,
-        pos_embed_dim: int = 8,
+        retrieve_num=10,
+        pos_emb_strategy="add",
+        total_pos_emb_dim=28,
     ):
         super().__init__()
         self.is_causal = is_causal
+        self.retrieve_num = retrieve_num
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
 
@@ -141,7 +173,9 @@ class SpatioTemporalDiTBlock(nn.Module):
             dim_head=hidden_size // num_heads,
             is_causal=is_causal,
             rotary_emb=temporal_rotary_emb,
-            pos_embed_dim=pos_embed_dim,
+            retrieve_num=retrieve_num,
+            pos_emb_strategy=pos_emb_strategy,
+            total_pos_emb_dim=total_pos_emb_dim,
         )
         self.t_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.t_mlp = Mlp(
@@ -183,10 +217,13 @@ class DiT(nn.Module):
         depth=12,
         num_heads=16,
         mlp_ratio=4.0,
-        external_cond_dim=25,
-        max_frames=32,
+        pos_condition_dim=4,
+        action_condition_dim=4,
+        max_frames=20,
+        retrieve_num=10,
+        pos_emb_strategy="add",
+        pos_emb_dim=3,
         gradient_checkpointing=False,
-        pos_embed_dim=8,
         dtype=torch.float32,
     ):
         super().__init__()
@@ -194,11 +231,15 @@ class DiT(nn.Module):
         self.out_channels = in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
+        self.pos_condition_dim = pos_condition_dim
+        self.action_condition_dim = action_condition_dim
         self.max_frames = max_frames
+        self.retrieve_num = retrieve_num
+        self.pos_emb_strategy = pos_emb_strategy
+        self.pos_emb_dim = pos_emb_dim
+        total_pos_emb_dim = pos_emb_dim * 2 * pos_condition_dim + pos_condition_dim
         self.gradient_checkpointing = gradient_checkpointing
         self.dtype = dtype
-        self.external_cond_dim = external_cond_dim
-        self.pos_embed_dim = pos_embed_dim
 
         self.x_embedder = PatchEmbed(input_h, input_w, patch_size, in_channels, hidden_size, flatten=False)
         self.t_embedder = TimestepEmbedder(hidden_size, dtype=dtype)
@@ -206,7 +247,7 @@ class DiT(nn.Module):
 
         self.spatial_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads // 2, freqs_for="pixel", max_freq=256)
         self.temporal_rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads)
-        self.external_cond = nn.Linear(external_cond_dim, hidden_size) if external_cond_dim > 0 else nn.Identity()
+        self.external_cond = nn.Linear(action_condition_dim, hidden_size) if action_condition_dim > 0 else nn.Identity()
 
         self.blocks = nn.ModuleList(
             [
@@ -217,7 +258,9 @@ class DiT(nn.Module):
                     is_causal=True,
                     spatial_rotary_emb=self.spatial_rotary_emb,
                     temporal_rotary_emb=self.temporal_rotary_emb,
-                    pos_embed_dim=pos_embed_dim,
+                    retrieve_num=retrieve_num,
+                    pos_emb_strategy=pos_emb_strategy,
+                    total_pos_emb_dim=total_pos_emb_dim,
                 )
                 for _ in range(depth)
             ]
@@ -273,7 +316,7 @@ class DiT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, w * p))
         return imgs
 
-    def forward(self, x, t, external_cond):
+    def forward(self, x, t, external_cond=None):
         """
         Forward pass of DiT.
         x: (B, T, C, H, W) tensor of spatial inputs (images or latent representations of images)
@@ -281,9 +324,13 @@ class DiT(nn.Module):
         """
 
         B, T, C, H, W = x.shape
-        assert external_cond.shape[2] == (self.external_cond_dim + 4), "External condition should have shape (B, T, external_cond_dim + 4)"
-        pose = external_cond[:, :, self.external_cond_dim:]
-        external_cond = external_cond[:, :, :self.external_cond_dim] if self.external_cond_dim > 0 else None
+        assert external_cond.shape[2] == (self.action_condition_dim + self.pos_condition_dim), "External condition should have shape (B, T, action_condition_dim + pos_condition_dim)"
+        pose = external_cond[:, :, self.action_condition_dim:]
+        external_cond = external_cond[:, :, :self.action_condition_dim]
+
+        pose = rearrange(pose, "b t c -> (b t) c")  # (B*T, pos_condition_dim)
+        pos_emb = pose_embeddings(pose, embed_dim=self.pos_emb_dim)  # (B * T, pos_emb_dim * 2 * pos_condition_dim + pos_condition_dim)
+        pos_emb = rearrange(pos_emb, "(b t) d -> b t d", b=B, t=T)  # (B, T, pos_emb_dim * 2 * pos_condition_dim + pos_condition_dim)
 
         # add spatial embeddings
         x = rearrange(x, "b t c h w -> (b t) c h w")
@@ -296,10 +343,6 @@ class DiT(nn.Module):
         c = rearrange(c, "(b t) d -> b t d", t=T)
         if torch.is_tensor(external_cond):
             c += self.external_cond(external_cond)
-
-        pose = rearrange(pose, "b t d -> (b t) d")
-        pos_emb = pose_embeddings(pose)
-        pos_emb = rearrange(pos_emb, "(b t) d -> b t d", t=T)
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
                 x = checkpoint(block, x, c, pos_emb, use_reentrant=False)

@@ -376,12 +376,9 @@ class LatentDFVideo(pl.LightningModule):
 
         masks = torch.ones(n_frames, batch_size).to(self.device)
 
-        if self.external_cond_dim > 0:
-            conditions = batch[1]
-            conditions = rearrange(conditions, "b t d -> t b d").contiguous()
-        else:
-            conditions = None
-
+        conditions = batch[1]
+        conditions = rearrange(conditions, "b t d -> t b d").contiguous()
+        
         xs = rearrange(xs, "b t c ... -> t b c ...").contiguous()
 
         return xs, conditions, masks

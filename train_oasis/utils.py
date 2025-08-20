@@ -716,6 +716,41 @@ def test_vae():
         )
         print(output_dict)
 
+def compute_fov(target, candidates, sample_num=1000, r=5, angle=160):
+    """
+    Compute the overlap between the target and candidates in terms of field of view (FOV).
+    target: (B, M, 4)
+    candidates: (B, N, 4)
+    sample_num: number of samples to use for computing FOV
+    r: radius of the FOV
+    Returns: (B, M, N)
+    """
+    # random sample points in the FOV
+    # theta = torch.linspace(-angle / 2, angle / 2, sample_num).unsqueeze(0).expand(target.shape[0], sample_num)
+    assert target.shape[2] == 4, "Target must have shape (B, M, 4)"
+    assert candidates.shape[2] == 4, "Candidates must have shape (B, N, 4)"
+    theta = torch.rand(sample_num, device=target.device) * angle - angle / 2
+    theta = theta.unsqueeze(0).unsqueeze(0).expand(target.shape[0], target.shape[1], sample_num) # (B, M, sample_num)
+    theta = theta + target[:, :, 3].unsqueeze(2)  # add the yaw of the target (B, M, sample_num)
+    theta = theta * torch.pi / 180.0  # convert to radians
+    sampled_r = torch.sqrt(torch.rand(sample_num, device=target.device)) * r  # (sample_num)
+    sampled_r = sampled_r.unsqueeze(0).unsqueeze(0).expand(target.shape[0], target.shape[1], sample_num)  # (B, M, sample_num)
+    x = sampled_r * torch.cos(theta) + target[:, :, 0].unsqueeze(2)  # add the x position of the target (B, M, sample_num)
+    z = sampled_r * torch.sin(theta) + target[:, :, 2].unsqueeze(2)  # add the z position of the target (B, M, sample_num)
+
+    target_points = torch.stack([x, z], dim=-1)  # (B, M, sample_num, 2)
+    length = torch.norm(target_points.unsqueeze(2) - candidates[..., [0, 2]].unsqueeze(1).unsqueeze(3), dim=-1)  # (B, M, N, sample_num)
+    alpha = torch.atan2(
+        target_points[:, :, :, 1].unsqueeze(2) - candidates[:, :, 2].unsqueeze(1).unsqueeze(-1),
+        target_points[:, :, :, 0].unsqueeze(2) - candidates[:, :, 0].unsqueeze(1).unsqueeze(-1)
+    ) * 180 / torch.pi  # (B, M, N, sample_num)
+    candidates_angle = torch.where(candidates[..., 3] > 180, candidates[..., 3] - 360, candidates[..., 3])  # normalize yaw to [-180, 180]
+    alpha = torch.abs(alpha - candidates_angle.unsqueeze(1).unsqueeze(-1)) # (B, M, N, sample_num)
+    alpha = torch.where(alpha > 180, 360 - alpha, alpha)  # normalize angle to [0, 180]
+    inside = (length < r) & (alpha < angle / 2) # (B, M, N, sample_num)
+    inside = inside.sum(dim=-1)  # (B, M, N)
+    inside = inside.float() / sample_num  # normalize by the number of samples
+    return inside
 
 if __name__ == "__main__":
     test_vae()

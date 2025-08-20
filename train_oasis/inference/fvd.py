@@ -173,7 +173,7 @@ def main():
 
 @torch.no_grad()
 def all():
-    model_names = ["yarn", "historical_buffer", "rag", "infini_attn", "vanilla_10", "vanilla_20"]
+    model_names = ["yarn", "historical_buffer", "rag", "infini_attn", "vanilla_10", "vanilla_20", "rag_multi"]
     gt_file_path = "/home/tc0786/Project/train-oasis/data/eval_data/paths.json"
     video_clip_length = 32
     save_path = "/home/tc0786/Project/train-oasis/outputs/eval_outputs/fvd.json"
@@ -216,7 +216,7 @@ def all():
         gt_feats = gt_feats.reshape(-1, 400)
         fake_feats = fake_feats.reshape(-1, 400)
         fvd = frechet_distance(fake_feats, gt_feats)
-        all_fvd[model_name] = fvd
+        all_fvd[model_name] = fvd / len(gt_paths)
     with open(save_path, "w") as f:
         json.dump(all_fvd, f, indent=4)
 

@@ -1,0 +1,16 @@
+architecture: rag_pos_dit
+input_h: &h 18
+input_w: &w 32
+patch_size: 2
+in_channels: &c 16
+hidden_size: 1024
+depth: 16
+num_heads: 16
+mlp_ratio: 4.0
+pos_condition_dim: 4
+action_condition_dim: 4
+pos_emb_strategy: concat
+pos_emb_dim: 3
+gradient_checkpointing: true
+observation_shape: [*c, *h, *w]
+precision: bf16-mixed

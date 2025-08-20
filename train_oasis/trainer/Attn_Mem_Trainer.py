@@ -20,6 +20,7 @@ from utils import (
     sigmoid_beta_schedule, 
     convert_zero_ckpt_into_state_dict,
 )
+from transformers import get_cosine_schedule_with_warmup
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
@@ -51,54 +52,27 @@ class AttentionMemoryTrainer(pl.LightningModule):
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
-        self.vae_name = cfg.vae_name
-        self.context_frames = cfg.context_frames
-        self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
+        self.scheduler = cfg.scheduler
 
         self.timesteps = cfg.diffusion.timesteps
         self.sampling_timesteps = cfg.diffusion.sampling_timesteps
         self.clip_noise = cfg.diffusion.clip_noise
         self.stabilization_level = cfg.diffusion.stabilization_level
 
-        self.cum_snr_decay = self.cfg.diffusion.cum_snr_decay ** cfg.frame_skip
+        self.cum_snr_decay = self.cfg.diffusion.cum_snr_decay
 
         self.validation_step_outputs = []
         self.metrics = cfg.metrics
         self.n_frames = cfg.n_frames  # number of max tokens for the model
 
         self.snr_clip = cfg.diffusion.snr_clip
-        self.scaling_factor = cfg.scaling_factor
         self.gradient_checkpointing = cfg.gradient_checkpointing
 
         self.stride = model_cfg.stride
         
         self._build_model(model_ckpt)
         self._build_buffer()
-
-    def register_data_mean_std(
-        self, mean: Union[str, float, Sequence], std: Union[str, float, Sequence], namespace: str = "data"
-    ):
-        """
-        Register mean and std of data as tensor buffer.
-
-        Args:
-            mean: the mean of data.
-            std: the std of data.
-            namespace: the namespace of the registered buffer.
-        """
-        for k, v in [("mean", mean), ("std", std)]:
-            if isinstance(v, str):
-                if v.endswith(".npy"):
-                    v = torch.from_numpy(np.load(v))
-                elif v.endswith(".pt"):
-                    v = torch.load(v)
-                else:
-                    raise ValueError(f"Unsupported file type {v.split('.')[-1]}.")
-            else:
-                v = torch.tensor(v)
-            self.register_buffer(f"{namespace}_{k}", v.float().to(self.device))
-
 
     def _build_model(self, model_ckpt):
         from train_oasis.model.attn_mem_dit import DiT
@@ -127,33 +101,6 @@ class AttentionMemoryTrainer(pl.LightningModule):
             print(f"Loading Diffusion model from {model_ckpt}")
             state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
             self.diffusion_model.load_state_dict(state_dict, strict=True)
-        
-        if self.cfg.vae_name == "oasis":
-            from train_oasis.model.vae import AutoencoderKL
-            from safetensors.torch import load_model
-            self.vae = AutoencoderKL(
-                latent_dim=16,
-                patch_size=20,
-                enc_dim=1024,
-                enc_depth=6,
-                enc_heads=16,
-                dec_dim=1024,
-                dec_depth=12,
-                dec_heads=16,
-                input_height=360,
-                input_width=640,
-            )
-            assert self.cfg.vae_ckpt, "VAE checkpoint is required for oasis VAE."
-            load_model(self.vae, self.cfg.vae_ckpt)
-            self.vae.eval()
-        elif self.cfg.vae_name == "flappy_bird":
-            assert self.cfg.vae_ckpt is None
-            from diffusers.models import AutoencoderKL
-            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema")
-            self.vae.eval()
-        else:
-            self.vae = None
-        self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         self.validation_fid_model = FrechetInceptionDistance(feature=64) if "fid" in self.metrics else None
         self.validation_lpips_model = LearnedPerceptualImagePatchSimilarity() if "lpips" in self.metrics else None
@@ -204,7 +151,15 @@ class AttentionMemoryTrainer(pl.LightningModule):
                 weight_decay=self.cfg.weight_decay,
                 betas=self.cfg.optimizer_beta,
             )
-            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            if self.scheduler == "cosine":
+                scheduler = get_cosine_schedule_with_warmup(
+                    optimizer_dynamics,
+                    num_warmup_steps=self.cfg.warmup_steps,
+                    num_training_steps=self.trainer.estimated_stepping_batches,
+                    num_cycles=0.5,
+                )
+            else:
+                scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
             return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         elif self.cfg.strategy == "deepspeed":
             optimizer_dynamics = DeepSpeedCPUAdam(
@@ -216,7 +171,15 @@ class AttentionMemoryTrainer(pl.LightningModule):
                 weight_decay=self.cfg.weight_decay,
                 betas=self.cfg.optimizer_beta,
             )
-            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            if self.scheduler == "cosine":
+                scheduler = get_cosine_schedule_with_warmup(
+                    optimizer_dynamics,
+                    num_warmup_steps=self.cfg.warmup_steps,
+                    num_training_steps=46000,# self.trainer.estimated_stepping_batches,
+                    num_cycles=0.5,
+                )
+            else:
+                scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
             return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         else:
             raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
@@ -226,7 +189,10 @@ class AttentionMemoryTrainer(pl.LightningModule):
         optimizer.step(closure=optimizer_closure)
 
     def lr_scheduler_step(self, scheduler, metric):
-        scheduler.step(step=self.trainer.global_step)
+        if self.scheduler == "cosine":
+            scheduler.step()
+        else:
+            scheduler.step(step=self.trainer.global_step)
 
     def compute_loss_weights(self, noise_levels: torch.Tensor):
         snr = self.snr[noise_levels]
@@ -256,7 +222,6 @@ class AttentionMemoryTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         xs, conditions, masks = self._preprocess_batch(batch)
         xs_gt = xs.clone()
-        xs = self.vae_encode(xs)
         noise = torch.randn_like(xs)
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
         noise_levels = self._generate_noise_levels(xs, masks)
@@ -272,7 +237,10 @@ class AttentionMemoryTrainer(pl.LightningModule):
         if nan_number != 0:
             loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
             self.global_nan_number += 1
-            self.log("training/nan", self.global_nan_number, prog_bar=True)
+            self.log("training/loss", loss, sync_dist=True, prog_bar=True)
+            self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
+            self.log("training/mem_lr", self.trainer.optimizers[0].param_groups[0]["lr"], sync_dist=True, prog_bar=False)
+            self.log("training/lr", self.trainer.optimizers[0].param_groups[1]["lr"], sync_dist=True, prog_bar=False)
             output_dict = {
                 "loss": loss,
             }
@@ -286,89 +254,23 @@ class AttentionMemoryTrainer(pl.LightningModule):
         
         # log the loss
         self.log("training/loss", loss, sync_dist=True, prog_bar=True)
-
-        xs_gt = self._unnormalize_x(xs_gt)
-        model_pred = self.vae_decode(model_pred)
-        model_pred = self._unnormalize_x(model_pred)
+        self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
+        self.log("training/mem_lr", self.trainer.optimizers[0].param_groups[0]["lr"], sync_dist=True, prog_bar=False)
+        self.log("training/lr", self.trainer.optimizers[0].param_groups[1]["lr"], sync_dist=True, prog_bar=False)
 
         output_dict = {
             "loss": loss,
-            "xs_pred": model_pred,
-            "xs": xs_gt,
         }
-        if batch_idx % self.cfg.save_video_every_n_step == 0 and self.logger and self.global_rank == 0:
-            log_video(
-                output_dict["xs_pred"][:, :8],
-                output_dict["xs"][:, :8],
-                step=self.global_step,
-                namespace="training_vis",
-                logger=self.logger.experiment,
-            )
+
         return output_dict
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
-        xs, conditions, masks = self._preprocess_batch(batch)
-        xs_gt = xs.clone()
-        xs = self.vae_encode(xs)
-        n_frames, batch_size, *_ = xs.shape
-
-        # context
-        n_context_frames = self.context_frames
-        xs_pred = xs[:n_context_frames].clone()
-
-        xs_pred = rearrange(xs_pred, "t b ... -> b t ...")
-        conditions = rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None
-        xs_pred = self.diffusion_model.sample(xs_pred, n_context_frames, n_frames, self.sampling_timesteps, conditions)
-        xs_pred = rearrange(xs_pred, "b t ... -> t b ...")
-        
-        # FIXME: loss
-        loss = F.mse_loss(xs_pred, xs, reduction="none")
-        loss = self.reweight_loss(loss, masks)
-
-        xs_gt = self._unnormalize_x(xs_gt)
-        xs_pred = self.vae_decode(xs_pred)
-        xs_pred = self._unnormalize_x(xs_pred)
-        self.validation_step_outputs.append((xs_pred.detach().cpu(), xs_gt.detach().cpu()))
-
-        return loss
+        return None
     
     def on_validation_epoch_end(self, namespace="validation") -> None:
         if not self.validation_step_outputs:
             return
-        xs_pred = []
-        xs = []
-        for pred, gt in self.validation_step_outputs:
-            xs_pred.append(pred)
-            xs.append(gt)
-        xs_pred = torch.cat(xs_pred, 1)
-        xs = torch.cat(xs, 1)
-
-        if self.logger:
-            log_video(
-                xs_pred,
-                xs,
-                step=None if namespace == "test" else self.global_step,
-                namespace=namespace + "_vis",
-                context_frames=self.context_frames,
-                logger=self.logger.experiment,
-            )
-
-        metric_dict = get_validation_metrics_for_videos(
-            xs_pred[self.context_frames :],
-            xs[self.context_frames :],
-            lpips_model=self.validation_lpips_model,
-            fid_model=self.validation_fid_model,
-            fvd_model=(self.validation_fvd_model[0] if self.validation_fvd_model else None),
-        )
-        self.log_dict(
-            {f"{namespace}/{k}": v for k, v in metric_dict.items()},
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-        )
-
-        self.validation_step_outputs.clear()
 
     def test_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
         return self.validation_step(*args, **kwargs, namespace="test")
@@ -404,45 +306,6 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
         return loss.mean()
 
-    @torch.no_grad()
-    def vae_encode(self, x):
-        if not self.vae:
-            return x
-        elif self.vae_name == "oasis":
-            batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
-            x = rearrange(x, "b t ... -> (b t) ...")
-            x = self.vae.encode(x).mean * self.scaling_factor
-            x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
-            return x
-        elif self.vae_name == "flappy_bird":
-            batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
-            x = rearrange(x, "b t ... -> (b t) ...")
-            x = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
-            x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
-            return x
-        else:
-            raise ValueError(f"Unsupported VAE {self.vae_name}.")
-    
-    @torch.no_grad()
-    def vae_decode(self, x):
-        # input: (b, t, c, h, w)
-        if not self.vae:
-            return x
-        elif self.vae_name == "oasis":
-            batch_size, n_frames, c, h, w = x.shape
-            x = rearrange(x, "b t c h w -> (b t) (h w) c")
-            x = self.vae.decode(x / self.scaling_factor)
-            x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
-            return x
-        elif self.vae_name == "flappy_bird":
-            batch_size, n_frames, c, h, w = x.shape
-            x = rearrange(x, "b t ... -> (b t) ...")
-            x = self.vae.decode(x / self.vae.config.scaling_factor).sample
-            x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
-            return x
-        else:
-            raise ValueError(f"Unsupported VAE {self.vae_name}.")
-
     def _preprocess_batch(self, batch):
         xs = batch[0]
         batch_size, n_frames, c, h, w = xs.shape
@@ -451,26 +314,10 @@ class AttentionMemoryTrainer(pl.LightningModule):
 
         if self.external_cond_dim > 0:
             conditions = batch[1]
-            conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
             conditions = rearrange(conditions, "b t d -> t b d").contiguous()
         else:
             conditions = None
 
-        xs = self._normalize_x(xs)
         xs = rearrange(xs, "b t c ... -> t b c ...").contiguous()
 
         return xs, conditions, masks
-
-    def _normalize_x(self, xs):
-        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
-        mean = self.data_mean.reshape(shape)
-        std = self.data_std.reshape(shape)
-        xs = (xs - mean) / std
-        return xs
-
-    def _unnormalize_x(self, xs):
-        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
-        mean = self.data_mean.reshape(shape)
-        std = self.data_std.reshape(shape)
-        xs = xs * std + mean
-        return xs

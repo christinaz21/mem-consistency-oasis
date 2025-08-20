@@ -2,8 +2,8 @@
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: latent_pos # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: latent_df # algorithm yaml file name in configurations/algorithm folder [fixme]
-  - model: action_dit # model yaml file name in configurations/model folder [fixme]
+  - algorithm: latent_frame_pack # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: frame_pack_dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
@@ -16,7 +16,7 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: pure_world_coordinate_emb
+name: frame_pack
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -39,13 +39,13 @@ experiment:
   
 algorithm:
   warmup_steps: 1000
-  external_cond_dim: 0
+  external_cond_dim: 4
 
 dataset:
-  n_frames: 20
-  action_type: pos
+  n_frames: 10
+  metadata:
+    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata.json
   limit_video_length:
-    - 13500
     - null
 
 model:
