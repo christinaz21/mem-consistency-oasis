@@ -88,13 +88,33 @@ class LatentDFVideo(pl.LightningModule):
                 gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
+        elif self.model_cfg.architecture == "lstm_dit":
+            from train_oasis.model.lstm_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                lstm_dropout=self.model_cfg.lstm_dropout,
+                lstm_layer_num=self.model_cfg.lstm_layer_num,
+                inner_window_size=self.model_cfg.inner_window_size,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
         else:
             raise ValueError(f"Unsupported architecture {self.model_cfg.architecture}.")
         
         if model_ckpt:
             print(f"Loading Diffusion model from {model_ckpt}")
             state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
-            self.diffusion_model.load_state_dict(state_dict, strict=True)
+            strict_load_ckpt = self.cfg.strict_load_ckpt if hasattr(self.cfg, "strict_load_ckpt") else True
+            self.diffusion_model.load_state_dict(state_dict, strict=strict_load_ckpt)
 
         self.validation_fid_model = FrechetInceptionDistance(feature=64) if "fid" in self.metrics else None
         self.validation_lpips_model = LearnedPerceptualImagePatchSimilarity() if "lpips" in self.metrics else None

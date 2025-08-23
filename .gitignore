@@ -2,6 +2,7 @@
 data
 outputs
 /tmp
+logs/
 
 __pycache__/
 *.out
