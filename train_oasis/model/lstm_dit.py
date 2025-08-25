@@ -65,8 +65,8 @@ class TemporalAxialAttention(nn.Module):
         assert T % self.inner_window_size == 0, f"Expect training frames {T} to divide inner window size {self.inner_window_size}"
         block_num = T // self.inner_window_size
         outputs = []
-        h0 = torch.zeros(self.lstm_layer_num, x.size(0), self.inner_dim, device=x.device)
-        c0 = torch.zeros(self.lstm_layer_num, x.size(0), self.inner_dim, device=x.device)
+        h0 = torch.zeros(self.lstm_layer_num, B * H * W, self.inner_dim, device=x.device, dtype=x.dtype)
+        c0 = torch.zeros(self.lstm_layer_num, B * H * W, self.inner_dim, device=x.device, dtype=x.dtype)
         
         for block in range(block_num):
             x_block = x[:, block * self.inner_window_size:(block + 1) * self.inner_window_size, :, :, :]  # (B, inner_window_size, H, W, D)

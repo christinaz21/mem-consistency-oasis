@@ -50,7 +50,7 @@ dataset:
   n_frames: 40
   action_type: action
   limit_video_length:
-  - 10000
+  - 6000
   - null
 
 model:

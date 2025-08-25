@@ -1,4 +1,4 @@
-architecture: oasis_dit
+architecture: lstm_dit
 input_h: &h 18
 input_w: &w 32
 patch_size: 2
