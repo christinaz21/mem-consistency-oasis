@@ -123,9 +123,11 @@ class TemporalAxialAttention(nn.Module):
 
         last_frame = x[:, -1:, :]  # (BHW, 1, D)
         out, (h_new, c_new) = self.lstm(last_frame, state_buffer)  # out: tensor of shape (BHW, 1, D)
-        if output_buffer.shape[1] == T:
-            output_buffer = output_buffer[:, 1:, :]  # remove the first frame
-        out = torch.cat([output_buffer, out], dim=1)  # append the new frame (BHW, T, D)
+        if output_buffer is not None:
+            if output_buffer.shape[1] == T:
+                output_buffer = output_buffer[:, 1:, :]  # remove the first frame
+            out = torch.cat([output_buffer, out], dim=1)  # append the new frame (BHW, T, D)
+            
         if update:
             output_buffer = out  # update the output buffer
             state_buffer = (h_new, c_new)  # update the state buffer
@@ -215,7 +217,7 @@ class SpatioTemporalDiTBlock(nn.Module):
 
         # temporal block
         t_shift_msa, t_scale_msa, t_gate_msa, t_shift_mlp, t_scale_mlp, t_gate_mlp = self.t_adaLN_modulation(c).chunk(6, dim=-1)
-        t_attn_output, output_buffer, state_buffer = self.t_attn(modulate(self.t_norm1(x), t_shift_msa, t_scale_msa), output_buffer, state_buffer, update)
+        t_attn_output, output_buffer, state_buffer = self.t_attn.inference(modulate(self.t_norm1(x), t_shift_msa, t_scale_msa), output_buffer, state_buffer, update)
         x = x + gate(t_attn_output, t_gate_msa)
         x = x + gate(self.t_mlp(modulate(self.t_norm2(x), t_shift_mlp, t_scale_mlp)), t_gate_mlp)
 
@@ -386,9 +388,9 @@ class DiT(nn.Module):
             state_buffer_list = [None] * len(self.blocks)
         for block, output_buffer, state_buffer in zip(self.blocks, output_buffer_list, state_buffer_list):
             if self.gradient_checkpointing and self.training:
-                x, output_buffer, state_buffer = checkpoint(block, x, c, output_buffer, state_buffer, update, use_reentrant=False)
+                x, output_buffer, state_buffer = checkpoint(block.inference, x, c, output_buffer, state_buffer, update, use_reentrant=False)
             else:
-                x, output_buffer, state_buffer = block(x, c, output_buffer, state_buffer, update)  # (N, T, H, W, D)
+                x, output_buffer, state_buffer = block.inference(x, c, output_buffer, state_buffer, update)  # (N, T, H, W, D)
             new_output_buffer_list.append(output_buffer)
             new_state_buffer_list.append(state_buffer)
         if self.gradient_checkpointing and self.training:

@@ -1,7 +1,7 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/df/lstm
+    dir: outputs/df/lstm_rotate
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
@@ -20,17 +20,17 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: pure_world_coordinate_emb
+name: lstm_rotate
 
 experiment:
-  model_ckpt: outputs/2025-05-25/07-51-43/checkpoints/epoch=0-step=41000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: outputs/df/lstm/checkpoints/epoch=0-step=14000.ckpt # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
     batch_size: 64
-    max_epochs: 1
+    max_epochs: 5
     checkpointing:
       every_n_train_steps: 1000
   validation:
@@ -49,9 +49,10 @@ algorithm:
 dataset:
   n_frames: 40
   action_type: action
+  metadata:
+    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata_mem.json
   limit_video_length:
-  - 6000
-  - null
+    - null
 
 model:
   precision: bf16-mixed
