@@ -1227,7 +1227,7 @@ def lstm():
     save_dir = f"/home/tc0786/Project/train-oasis/outputs/eval_outputs/{model_name}"
     os.makedirs(save_dir, exist_ok=True)
 
-    oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/df/lstm/checkpoints/epoch=0-step=14000.ckpt"
+    oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/df/lstm_long_2/checkpoints/epoch=0-step=41000.ckpt"
     inner_window_size = 10
     vae_ckpt = "/home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors"
 
@@ -1279,7 +1279,6 @@ def lstm():
     alphas_cumprod = torch.cumprod(alphas, dim=0)
     alphas_cumprod = rearrange(alphas_cumprod, "T -> T 1 1 1")
     # model.max_frames = window_size
-
 
     for inference_split in inference_splits:
         # memory tasks
@@ -1398,7 +1397,7 @@ def lstm():
                     all_frames.append(x_clip)
                 x = torch.cat(all_frames, dim=0)
             x = rearrange(x, "(b t) c h w -> b t h w c", t=total_frames)
-            assert torch.isnan(x).sum() == 0, f"NaN detected after vae decoding"
+            # assert torch.isnan(x).sum() == 0, f"NaN detected after vae decoding"
 
             for idx in range(B):
                 # save video

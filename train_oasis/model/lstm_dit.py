@@ -140,6 +140,42 @@ class TemporalAxialAttention(nn.Module):
         x = self.to_out(x)
         return x, output_buffer, state_buffer
 
+    def chunk_inference(self, x: torch.Tensor, state_buffer):
+        """
+        x: (B, T, H, W, D), the last frame will be denoised
+        output_buffer: (BHW, T, D)
+        state_buffer: ((num_layers, BHW, D), (num_layers, BHW, D)) h, c
+        """
+        B, T, H, W, D = x.shape
+        BHW = B * H * W
+
+        q, k, v = self.to_qkv(x).chunk(3, dim=-1)
+
+        q = rearrange(q, "B T H W (h d) -> (B H W) h T d", h=self.heads)
+        k = rearrange(k, "B T H W (h d) -> (B H W) h T d", h=self.heads)
+        v = rearrange(v, "B T H W (h d) -> (B H W) h T d", h=self.heads)
+
+        q = self.rotary_emb.rotate_queries_or_keys(q, self.rotary_emb.freqs)
+        k = self.rotary_emb.rotate_queries_or_keys(k, self.rotary_emb.freqs)
+
+        q, k, v = map(lambda t: t.contiguous(), (q, k, v))
+        x = F.scaled_dot_product_attention(query=q, key=k, value=v, is_causal=self.is_causal)
+
+        # LSTM
+        x = rearrange(x, "BHW h T d -> BHW T (h d)")
+
+        out, (h_new, c_new) = self.lstm(x, state_buffer)  # out: tensor of shape (BHW, T, D)
+
+        state_buffer = (h_new, c_new)  # update the state buffer
+        x = x + out  # residual connection
+
+        x = rearrange(x, "(B H W) T D -> B T H W D", B=B, H=H, W=W)
+        x = x.type_as(q)
+
+        # linear proj
+        x = self.to_out(x)
+        return x, state_buffer
+
 class SpatioTemporalDiTBlock(nn.Module):
     def __init__(
         self,
@@ -222,6 +258,20 @@ class SpatioTemporalDiTBlock(nn.Module):
         x = x + gate(self.t_mlp(modulate(self.t_norm2(x), t_shift_mlp, t_scale_mlp)), t_gate_mlp)
 
         return x, output_buffer, state_buffer
+
+    def chunk_inference(self, x, c, state_buffer):
+        # spatial block
+        s_shift_msa, s_scale_msa, s_gate_msa, s_shift_mlp, s_scale_mlp, s_gate_mlp = self.s_adaLN_modulation(c).chunk(6, dim=-1)
+        x = x + gate(self.s_attn(modulate(self.s_norm1(x), s_shift_msa, s_scale_msa)), s_gate_msa)
+        x = x + gate(self.s_mlp(modulate(self.s_norm2(x), s_shift_mlp, s_scale_mlp)), s_gate_mlp)
+
+        # temporal block
+        t_shift_msa, t_scale_msa, t_gate_msa, t_shift_mlp, t_scale_mlp, t_gate_mlp = self.t_adaLN_modulation(c).chunk(6, dim=-1)
+        t_attn_output, state_buffer = self.t_attn.chunk_inference(modulate(self.t_norm1(x), t_shift_msa, t_scale_msa), state_buffer)
+        x = x + gate(t_attn_output, t_gate_msa)
+        x = x + gate(self.t_mlp(modulate(self.t_norm2(x), t_shift_mlp, t_scale_mlp)), t_gate_mlp)
+
+        return x, state_buffer
 
 class DiT(nn.Module):
     """
@@ -403,3 +453,37 @@ class DiT(nn.Module):
         x = rearrange(x, "(b t) c h w -> b t c h w", t=T)
 
         return x, new_output_buffer_list, new_state_buffer_list
+
+    def chunk_inference(self, x, t, external_cond=None, state_buffer_list=None):
+        B, T, C, H, W = x.shape
+
+        # add spatial embeddings
+        x = rearrange(x, "b t c h w -> (b t) c h w")
+        x = self.x_embedder(x)  # (B*T, C, H, W) -> (B*T, H/2, W/2, D) , C = 16, D = d_model
+        # restore shape
+        x = rearrange(x, "(b t) h w d -> b t h w d", t=T)
+        # embed noise steps
+        t = rearrange(t, "b t -> (b t)")
+        c = self.t_embedder(t)  # (N, D)
+        c = rearrange(c, "(b t) d -> b t d", t=T)
+        if torch.is_tensor(external_cond):
+            c += self.external_cond(external_cond)
+        new_state_buffer_list = []
+        if state_buffer_list is None:
+            state_buffer_list = [None] * len(self.blocks)
+        for block, state_buffer in zip(self.blocks, state_buffer_list):
+            if self.gradient_checkpointing and self.training:
+                x, state_buffer = checkpoint(block.chunk_inference, x, c, state_buffer, use_reentrant=False)
+            else:
+                x, state_buffer = block.chunk_inference(x, c, state_buffer)  # (N, T, H, W, D)
+            new_state_buffer_list.append(state_buffer)
+        if self.gradient_checkpointing and self.training:
+            x = checkpoint(self.final_layer, x, c, use_reentrant=False)
+        else:
+            x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
+        # unpatchify
+        x = rearrange(x, "b t h w d -> (b t) h w d")
+        x = self.unpatchify(x)  # (N, out_channels, H, W)
+        x = rearrange(x, "(b t) c h w -> b t c h w", t=T)
+
+        return x, new_state_buffer_list

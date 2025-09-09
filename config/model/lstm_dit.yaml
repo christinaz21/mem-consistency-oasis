@@ -12,3 +12,4 @@ lstm_layer_num: 1
 inner_window_size: 10
 gradient_checkpointing: true
 observation_shape: [*c, *h, *w]
+precision: bf16-mixed
