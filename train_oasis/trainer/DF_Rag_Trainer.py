@@ -34,10 +34,6 @@ class DiffusionForcingRagVideo(pl.LightningModule):
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
-        # if self.cfg.vae_name == "oasis":
-        #     self.x_shape = [16, 18, 32]
-        # elif self.cfg.vae_name == "flappy_bird":
-        #     self.x_shape = [4, 64, 36]
         self.vae_name = cfg.vae_name
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
@@ -164,10 +160,10 @@ class DiffusionForcingRagVideo(pl.LightningModule):
             assert self.cfg.vae_ckpt, "VAE checkpoint is required for oasis VAE."
             load_model(self.vae, self.cfg.vae_ckpt)
             self.vae.eval()
-        elif self.cfg.vae_name == "flappy_bird":
-            assert self.cfg.vae_ckpt is None
+        elif self.cfg.vae_name == "sd_vae":
+            assert self.cfg.vae_ckpt
             from diffusers.models import AutoencoderKL
-            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema")
+            self.vae = AutoencoderKL.from_pretrained(self.cfg.vae_ckpt)
             self.vae.eval()
         else:
             self.vae = None
@@ -485,7 +481,7 @@ class DiffusionForcingRagVideo(pl.LightningModule):
             x = self.vae.encode(x).mean * self.scaling_factor
             x = rearrange(x, "(b t) (h w) c -> b t c h w", b=batch_size, t=n_frames, h=18, w=32, c=16)
             return x
-        elif self.vae_name == "flappy_bird":
+        elif self.vae_name == "sd_vae":
             batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
             x = rearrange(x, "b t ... -> (b t) ...")
             x = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
@@ -505,7 +501,7 @@ class DiffusionForcingRagVideo(pl.LightningModule):
             x = self.vae.decode(x / self.scaling_factor)
             x = rearrange(x, "(b t) c h w -> b t c h w", b=batch_size, t=n_frames)
             return x
-        elif self.vae_name == "flappy_bird":
+        elif self.vae_name == "sd_vae":
             batch_size, n_frames, c, h, w = x.shape
             x = rearrange(x, "b t ... -> (b t) ...")
             x = self.vae.decode(x / self.vae.config.scaling_factor).sample

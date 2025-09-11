@@ -43,8 +43,8 @@ dataset:
 algorithm:
   save_video_every_n_step: 3000
   warmup_steps: 6000
-  vae_name: flappy_bird
-  vae_ckpt: null
+  vae_name: sd_vae
+  vae_ckpt: stabilityai/sd-vae-ft-mse
 
 model:
   precision: bf16-mixed

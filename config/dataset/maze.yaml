@@ -1,0 +1,9 @@
+debug: ${debug} # inherited from configurations/config.yaml
+
+n_frames: 100 # TODO: increase later
+action_types: [action] # action, agent_pos, agent_dir
+pre_load: false
+metadata:
+  - /home/tc0786/Project/train-oasis/data/maze/metadata.json
+limit_video_length:
+  - null

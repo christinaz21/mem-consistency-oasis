@@ -752,5 +752,34 @@ def compute_fov(target, candidates, sample_num=1000, r=5, angle=160):
     inside = inside.float() / sample_num  # normalize by the number of samples
     return inside
 
+def test_sd_vae():
+    from diffusers.models import AutoencoderKL
+    # vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema")
+    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse")
+    # vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae")
+    vae.eval()
+    path = "data/maze/eval/20220920T045048-1000.npz"
+    data = np.load(path, allow_pickle=True)
+    x = data["image"][:5]  # (B, T, C, H, W)
+    x = torch.from_numpy(x).float().unsqueeze(0) / 255.0
+    x = rearrange(x, "b t h w c -> b t c h w")
+    print(x.shape)
+    x = (x - 0.5) / 0.5
+    origin_x = x.clone()
+
+    batch_size, n_frames, c, h, w = x.shape
+    x = rearrange(x, "b t ... -> (b t) ...")
+    x = vae.encode(x).latent_dist.sample() * vae.config.scaling_factor
+    x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
+    print(x.shape)
+
+    x = rearrange(x, "b t ... -> (b t) ...")
+    x = vae.decode(x / vae.config.scaling_factor).sample
+    x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
+    print(x.shape)
+
+    mae_error = torch.abs(x - origin_x).mean()
+    print("mae error:", mae_error.item())
+
 if __name__ == "__main__":
-    test_vae()
+    test_sd_vae()

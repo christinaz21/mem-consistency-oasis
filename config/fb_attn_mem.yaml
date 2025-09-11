@@ -46,5 +46,5 @@ dataset:
 algorithm:
   gradient_checkpointing: true
   mem_beta_lr: 1e-3
-  vae_name: flappy_bird
-  vae_ckpt: null
+  vae_name: sd_vae
+  vae_ckpt: stabilityai/sd-vae-ft-mse
