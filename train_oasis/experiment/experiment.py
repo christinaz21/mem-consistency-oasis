@@ -5,6 +5,7 @@ from train_oasis.dataset.flappy_bird_fast import FlappyBirdFastDataset
 from train_oasis.dataset.minecraft_easy import MinecraftEasyDataset
 from train_oasis.dataset.minecraft_pos import MinecraftPosDataset
 from train_oasis.dataset.latent_pos import LatentPosDataset
+from train_oasis.dataset.maze import MazeDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
 from train_oasis.trainer.DF_GAN_Trainer import DFGANVideo
@@ -58,6 +59,7 @@ class VideoPredictionExperiment:
         minecraft_easy=MinecraftEasyDataset,
         minecraft_pos=MinecraftPosDataset,
         latent_pos=LatentPosDataset,
+        maze=MazeDataset,
     )
 
     def __init__(

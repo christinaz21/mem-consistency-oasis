@@ -4,13 +4,11 @@ import numpy as np
 from omegaconf import DictConfig
 from pathlib import Path
 import json
-from torchvision.io import read_video
 import os
 from tqdm import tqdm
-from fractions import Fraction
+from einops import rearrange
 
-
-class LatentPosDataset(torch.utils.data.Dataset):
+class MazeDataset(torch.utils.data.Dataset):
     """
     Minecraft dataset
     """
@@ -33,17 +31,17 @@ class LatentPosDataset(torch.utils.data.Dataset):
         for metadata_path, limit_video_length in zip(self.metadata_paths, self.limit_video_lengths):
             if not Path(metadata_path).exists():
                 raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
-            metadata = json.load(open(metadata_path, "r"))
+            metadata = json.load(open(metadata_path, "r"))[split]
             if limit_video_length is not None:
                 metadata = metadata[:limit_video_length]
             data_paths = [Path(x["file"]) for x in metadata]
             lengths = [x["length"] for x in metadata]
             self.lengths.extend(lengths)
 
-            if self.pre_load:
+            if not self.pre_load:
                 self.paths.extend(data_paths)
             else:
-                for data_path in data_paths:
+                for data_path in tqdm(data_paths, desc="Pre-loading data"):
                     if not data_path.exists():
                         raise FileNotFoundError(f"Action file not found: {data_path}")
                     data = np.load(data_path, allow_pickle=True)
@@ -52,6 +50,7 @@ class LatentPosDataset(torch.utils.data.Dataset):
                     self.actions.append(actions)
                     video = data["image"]
                     video = torch.from_numpy(video).float() / 255.0
+                    video = rearrange(video, "t h w c -> t c h w")
                     self.videos.append(video)
                     if video.shape[0] != actions.shape[0]:
                         raise ValueError(f"Video and action lengths do not match: {video.shape[0]} != {actions.shape[0]}")
@@ -103,6 +102,7 @@ class LatentPosDataset(torch.utils.data.Dataset):
             actions = torch.from_numpy(actions).float()
             video = data["image"][frame_idx : frame_idx + self.n_frames]
             video = torch.from_numpy(video).float() / 255.0
+            video = rearrange(video, "t h w c -> t c h w")
         nonterminal = np.ones(self.n_frames)
 
         assert actions.shape[0] == self.n_frames
@@ -122,7 +122,8 @@ def handle_metadata():
     for split in ["train", 'eval']:
         split_dir = os.path.join(dir_path, split)
         data_files = [f for f in os.listdir(split_dir)]
-        metadata[split] = [
+        split_name = "training" if split == "train" else "validation"
+        metadata[split_name] = [
             {
                 "file": os.path.abspath(os.path.join(split_dir, f)),
                 "length": 1001,  # All videos are 1001 frames long
@@ -158,4 +159,4 @@ def check_terminal():
             print(f"Terminal found in {path}")
 
 if __name__ == "__main__":
-    show_example()
+    handle_metadata()
