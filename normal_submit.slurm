@@ -16,6 +16,6 @@ conda activate oasis
 module load cudatoolkit/11.8
 
 # python /home/tc0786/Project/train-oasis/train_oasis/inference/evaluate.py
-torchrun --nnodes=1 --nproc_per_node=4 /home/tc0786/Project/train-oasis/train_oasis/main.py --config-name=maze
+torchrun --nnodes=1 --nproc_per_node=4 /home/tc0786/Project/train-oasis/train_oasis/main.py --config-name=latent_rag
 # python train_oasis/inference/lstm_chunk.py
 # python /home/tc0786/Project/train-oasis/train_oasis/inference/batch_inference.py

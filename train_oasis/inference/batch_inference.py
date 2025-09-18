@@ -1214,7 +1214,7 @@ def frame_pack():
 
 @torch.no_grad()
 def lstm():
-    model_name = "lstm" # "vanilla_10", "vanilla_20", "world_coordinate", "pred_x"
+    model_name = "lstm_long_term" # "vanilla_10", "vanilla_20", "world_coordinate", "pred_x"
     inference_splits = ["memory", "random"]
     ddim_noise_steps = 20
     n_prompt_frames = 100
@@ -1227,7 +1227,7 @@ def lstm():
     save_dir = f"/home/tc0786/Project/train-oasis/outputs/eval_outputs/{model_name}"
     os.makedirs(save_dir, exist_ok=True)
 
-    oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/df/lstm_long_2/checkpoints/epoch=0-step=41000.ckpt"
+    oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/df/lstm_long_term/checkpoints/epoch=0-step=21000.ckpt"
     inner_window_size = 10
     vae_ckpt = "/home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors"
 

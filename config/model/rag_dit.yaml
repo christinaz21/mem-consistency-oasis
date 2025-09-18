@@ -9,3 +9,4 @@ num_heads: 16
 mlp_ratio: 4.0
 gradient_checkpointing: true
 observation_shape: [*c, *h, *w]
+precision: bf16-mixed

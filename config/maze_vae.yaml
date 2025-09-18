@@ -1,7 +1,7 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/df/maze_vae
+    dir: outputs/df/maze_200
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
@@ -20,7 +20,7 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: maze_vae
+name: maze_200
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -29,7 +29,7 @@ experiment:
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 64
+    batch_size: 32
     max_epochs: 1
     checkpointing:
       every_n_train_steps: 1000
@@ -43,6 +43,7 @@ experiment:
 
 dataset:
   pre_load: false
+  n_frames: 200
 
 algorithm:
   warmup_steps: 1000

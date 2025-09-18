@@ -24,7 +24,7 @@ from train_oasis.model.image_discriminator import (
 from train_oasis.model.vae import VAE_models
 from safetensors.torch import load_model
 from tqdm import tqdm
-
+import os
 
 @torch.no_grad()
 def uiqi_frame(pred, gt):
@@ -117,7 +117,7 @@ def get_validation_metrics_for_videos(
 
 @torch.no_grad()
 def evaluate():
-    device = "cuda"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
     validation_fid_model = FrechetInceptionDistance(feature=64).to(device)
     # validation_lpips_model = LearnedPerceptualImagePatchSimilarity().to(device)
@@ -129,16 +129,18 @@ def evaluate():
     load_model(vae, vae_ckpt)
     vae = vae.to(device).eval()
 
-    image_discriminators = {
-        "full_step_resnet": ImageDiscriminatorResNet(),
-        "small_dit": ImageDiscriminator(depth=4, gradient_checkpointing=False),
-        "1000_step_resnet": ImageDiscriminatorResNet(),
-    }
-    image_discriminators_ckpt = {
-        "1000_step_resnet": "/home/tc0786/Project/train-oasis/models/discriminator/1000_step_resnet.pth",
-        "small_dit": "/home/tc0786/Project/train-oasis/models/discriminator/small_dit.pth",
-        "full_step_resnet": "/home/tc0786/Project/train-oasis/models/discriminator/full_step_resnet.pth",
-    }
+    # image_discriminators = {
+    #     "full_step_resnet": ImageDiscriminatorResNet(),
+    #     "small_dit": ImageDiscriminator(depth=4, gradient_checkpointing=False),
+    #     "1000_step_resnet": ImageDiscriminatorResNet(),
+    # }
+    # image_discriminators_ckpt = {
+    #     "1000_step_resnet": "/home/tc0786/Project/train-oasis/models/discriminator/1000_step_resnet.pth",
+    #     "small_dit": "/home/tc0786/Project/train-oasis/models/discriminator/small_dit.pth",
+    #     "full_step_resnet": "/home/tc0786/Project/train-oasis/models/discriminator/full_step_resnet.pth",
+    # }
+    image_discriminators = {}
+    image_discriminators_ckpt = {}
     for name, model in image_discriminators.items():
         ckpt_path = image_discriminators_ckpt[name]
         assert os.path.exists(ckpt_path), f"Checkpoint path {ckpt_path} does not exist."
@@ -147,7 +149,7 @@ def evaluate():
         model = model.to(device).to(dtype).eval()
         image_discriminators[name] = model
 
-    model_names = ["rag_pred_pose", "rag_multi_pred_pose"] # ["vanilla_20_longer", "vanilla_40_direct_extrapolate", "frame_pack", "yarn", "historical_buffer", "rag", "infini_attn", "vanilla_10", "vanilla_20", "world_coordinate"]
+    model_names = ["lstm", "lstm_chunk", "lstm_long_term"] # ["vanilla_20_longer", "vanilla_40_direct_extrapolate", "frame_pack", "yarn", "historical_buffer", "rag", "infini_attn", "vanilla_10", "vanilla_20", "world_coordinate", "rag_pred_pose", "rag_multi_pred_pose"]
     eval_split = ["memory", "random"]
 
     gt_file_path = "/home/tc0786/Project/train-oasis/data/eval_data/paths.json"
