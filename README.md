@@ -51,3 +51,15 @@ The process is similar to running Diffusion Force. You need to configure the set
 
 1. You can adjust `max_frames` and `n_frames` based on your GPU memory capacity. Ensure that `context_length` and `stride` are set to half of `max_frames`.
 2. You can set the training strategy to **deepspeed**, but note that it will consume more memory.
+
+## About the maze dataset
+
+1. data architecture
+    ```
+    path.npz
+        |-- image: (n, 64, 64, 3)
+        |-- agent_pos: (n, 2)
+        |-- agent_dir: (n,)
+        |-- action: (n, 6)
+        ...
+    ```

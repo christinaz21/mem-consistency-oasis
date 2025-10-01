@@ -1,0 +1,16 @@
+architecture: mamba_dit
+input_h: &h 8
+input_w: &w 8
+patch_size: 2
+in_channels: &c 4
+hidden_size: 1024
+depth: 12
+num_heads: 16
+mlp_ratio: 4.0
+mamba_d_state: 64
+mamba_d_conv: 4
+mamba_expand: 2
+inner_window_size: 20
+gradient_checkpointing: true
+observation_shape: [*c, *h, *w]
+precision: bf16-mixed

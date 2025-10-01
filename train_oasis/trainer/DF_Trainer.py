@@ -132,6 +132,44 @@ class DiffusionForcingVideo(pl.LightningModule):
                 gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
+        elif self.model_cfg.architecture == "lstm_dit":
+            from train_oasis.model.lstm_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                lstm_dropout=self.model_cfg.lstm_dropout,
+                lstm_layer_num=self.model_cfg.lstm_layer_num,
+                inner_window_size=self.model_cfg.inner_window_size,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
+        elif self.model_cfg.architecture == "mamba_dit":
+            from train_oasis.model.mamba_dit import DiT
+            self.diffusion_model = DiT(
+                input_h=self.model_cfg.input_h,
+                input_w=self.model_cfg.input_w,
+                patch_size=self.model_cfg.patch_size,
+                in_channels=self.model_cfg.in_channels,
+                hidden_size=self.model_cfg.hidden_size,
+                depth=self.model_cfg.depth,
+                num_heads=self.model_cfg.num_heads,
+                mlp_ratio=self.model_cfg.mlp_ratio,
+                external_cond_dim=self.external_cond_dim,
+                max_frames=self.cfg.n_frames,
+                mamba_d_state=self.model_cfg.mamba_d_state,
+                mamba_d_conv=self.model_cfg.mamba_d_conv,
+                mamba_expand=self.model_cfg.mamba_expand,
+                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+            )
         else:
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
         

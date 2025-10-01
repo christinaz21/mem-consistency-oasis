@@ -1,0 +1,51 @@
+# configuration parsing starts here
+hydra:
+  run:
+    dir: outputs/df/mamba_maze
+
+defaults:
+  - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
+  - dataset: maze # dataset yaml file name in configurations/dataset folder [fixme]
+  - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: mamba_maze_dit # model yaml file name in configurations/model folder [fixme]
+  - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
+
+debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
+
+wandb:
+  entity: tychen0028 # wandb account name / organization name [fixme]
+  project: diffusion-forcing # wandb project name; if not provided, defaults to root folder name [fixme]
+  mode: offline # set wandb logging to online, offline or dryrun
+
+resume: null # wandb run id to resume logging and loading checkpoint from
+load: null # wandb run id containing checkpoint or a path to a checkpoint file
+
+name: mamba_maze
+
+experiment:
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
+  tasks: [training]
+  training:
+    precision: bf16-mixed
+    devices: auto
+    strategy: deepspeed
+    batch_size: 48
+    max_epochs: 1
+    checkpointing:
+      every_n_train_steps: 1000
+  validation:
+    precision: bf16-mixed
+    strategy: deepspeed
+    batch_size: 8
+    limit_batch: 1
+    val_every_n_step: null
+    val_every_n_epoch: 5000
+  
+algorithm:
+  warmup_steps: 1000
+  vae_name: sd_vae
+  vae_ckpt: stabilityai/sd-vae-ft-mse
+
+dataset:
+  pre_load: false
+  n_frames: 100

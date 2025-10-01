@@ -429,21 +429,22 @@ def rag():
     video_offset = None
     batch_size = 10
     n_prompt_frames = 100
-    file_path = "/home/tc0786/Project/train-oasis/data/eval_data/pred_pose_paths.json"
-    # file_path = "/home/tc0786/Project/train-oasis/data/eval_data/paths.json"
+    # file_path = "/home/tc0786/Project/train-oasis/data/eval_data/pred_pose_paths.json"
+    file_path = "/home/tc0786/Project/train-oasis/data/eval_data/paths.json"
     with open(file_path, "r") as f:
         paths = json.load(f)
 
     inference_splits = ["memory", "random"]
 
-    model_name = "rag_multi_pred_pose" # "rag_wo_training" "rag" "rag_multi"
+    model_name = "rag_multi" # "rag_wo_training" "rag" "rag_multi"
 
     if model_name == "rag" or model_name == "rag_pred_pose":
         oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-12/12-57-27/checkpoints/epoch=2-step=12000.ckpt"
     elif model_name == "rag_wo_training":
         oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-08/02-24-21/checkpoints/epoch=2-step=6000.ckpt"
     elif model_name == "rag_multi" or model_name == "rag_multi_pred_pose":
-        oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-18/03-14-16/checkpoints/epoch=1-step=10000.ckpt"
+        # oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-18/03-14-16/checkpoints/epoch=1-step=10000.ckpt"
+        oasis_ckpt = "outputs/checkpoints/anjian/18-43-16/checkpoints/epoch=0-step=38000.ckpt"
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     window_size = 20
@@ -1410,6 +1411,6 @@ def lstm():
                 write_video(output_path, video, fps=fps)
 
 if __name__ == "__main__":
-    lstm()
+    rag()
     # check_length()
     # vanilla()

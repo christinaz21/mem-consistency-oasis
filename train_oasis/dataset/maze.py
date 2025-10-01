@@ -7,6 +7,7 @@ import json
 import os
 from tqdm import tqdm
 from einops import rearrange
+import matplotlib.pyplot as plt
 
 class MazeDataset(torch.utils.data.Dataset):
     """
@@ -157,6 +158,36 @@ def check_terminal():
         data = np.load(path, allow_pickle=True)
         if np.any(data['terminal']):
             print(f"Terminal found in {path}")
+
+def visualize():
+    path = "/home/tc0786/Project/train-oasis/data/maze/eval/20220920T045206-1000.npz"
+    data = np.load(path, allow_pickle=True)
+
+    print(data.files)
+    print(data["maze_layout"].shape)
+    origin_layout = data["maze_layout"][0]
+
+    # ---------- 在此之后追加 ----------
+    # 可视化 agent 在迷宫上的轨迹
+    agent_positions = data["agent_pos"]  # 假设形状为 (T, 2)，格式 [row, col]
+
+    plt.figure(figsize=(6, 6))
+    # 显示迷宫布局，1 为墙，0 为通道，用灰度反转
+    plt.imshow(origin_layout, cmap='gray')
+    # 拆分坐标
+    xs = agent_positions[:, 0] - 0.5
+    ys = agent_positions[:, 1] - 0.5
+    # 画出轨迹
+    plt.plot(xs, ys, '-o', color='blue', markersize=4, label='trajectory')
+    # 标记起点和终点
+    plt.scatter(xs[0], ys[0], color='green', s=80, label='start')
+    plt.scatter(xs[-1], ys[-1], color='red', s=80, label='end')
+
+    plt.title("Agent Trajectory on Maze")
+    plt.legend(loc='upper right')
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("data/maze/agent_trajectory.png")
 
 if __name__ == "__main__":
     handle_metadata()
