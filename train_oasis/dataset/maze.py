@@ -17,8 +17,6 @@ class MazeDataset(torch.utils.data.Dataset):
     def __init__(self, cfg: DictConfig, split: str = "training"):
         super().__init__()
         self.split = split
-        if split == "validation":
-            return
         self.n_frames = cfg.n_frames
         self.pre_load = cfg.pre_load
         self.action_types = cfg.action_types
@@ -73,10 +71,7 @@ class MazeDataset(torch.utils.data.Dataset):
         return np.concatenate(all_actions, axis=-1)
 
     def __len__(self):
-        if self.split == "training":
-            return self.clips_per_video.sum()
-        else:
-            return 0
+        return self.clips_per_video.sum()
 
     def split_idx(self, idx):
         video_idx = np.argmax(self.cum_clips_per_video > idx)
@@ -115,14 +110,26 @@ class MazeDataset(torch.utils.data.Dataset):
             nonterminal
         )
 
+def unzip():
+    import zipfile
+    root_dir = "data/maze"
+    output_dir = "data/maze/train"
+    for i in range(3, 9):
+        zip_path = os.path.join(root_dir, f"train-part{i}.zip")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(output_dir)
+            print(f"Extracted {zip_path} to {output_dir}")
+
 def handle_metadata():
-    dir_path = "data/maze"
-    metadata_path = "data/maze/metadata.json"
+    dir_path = "data/maze_9"
+    metadata_path = "data/maze_9/metadata.json"
 
     metadata = {}
     for split in ["train", 'eval']:
         split_dir = os.path.join(dir_path, split)
         data_files = [f for f in os.listdir(split_dir)]
+        for d in data_files:
+            assert d.endswith(".npz"), f"Unexpected file format: {d}"
         split_name = "training" if split == "train" else "validation"
         metadata[split_name] = [
             {
@@ -152,7 +159,7 @@ def check_terminal():
     with open("data/maze/metadata.json", "r") as f:
         metadata = json.load(f)
 
-    for d in tqdm(metadata['train']):
+    for d in tqdm(metadata['training']):
         path = d["file"]
 
         data = np.load(path, allow_pickle=True)
@@ -189,5 +196,7 @@ def visualize():
     plt.tight_layout()
     plt.savefig("data/maze/agent_trajectory.png")
 
+
 if __name__ == "__main__":
+    # show_example()
     handle_metadata()

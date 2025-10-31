@@ -1,12 +1,12 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/df/memory_token_100_10
+    dir: outputs/rnn/df_maze
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: maze # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: df_mt_video # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
   - model: latent_maze_dit # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
@@ -20,43 +20,40 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: memory_token_100_10
+name: df_maze
 
 experiment:
-  model_ckpt: outputs/df/maze_100_mt10/checkpoints/epoch=0-step=40000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
-    lr: 2e-3
-    optim:
-      accumulate_grad_batches: 4
     precision: bf16-mixed
     devices: auto
-    strategy: deepspeed
-    batch_size: 48
-    max_epochs: 3000
+    strategy: ddp
+    batch_size: 128
+    max_epochs: -1
+    max_steps: 39000
+    log_every_n_steps: 50
     checkpointing:
-      every_n_train_steps: 1000
+      every_n_train_steps: 13000
+      enable_version_counter: True
   validation:
     precision: bf16-mixed
-    strategy: deepspeed
+    strategy: ddp
     batch_size: 4
     limit_batch: 1
-    val_every_n_epoch: 5000
+    val_every_n_epoch: 50
     val_every_n_step: null
 
 dataset:
-  pre_load: true
-  n_frames: 100
-  metadata:
-    - /home/tc0786/Project/train-oasis/data/maze/metadata.json
-  limit_video_length:
-    - 1
+  pre_load: false
+  n_frames: 20
+  external_cond_dim: 10
+  action_types: [action, agent_pos, agent_dir]
 
 algorithm:
-  warmup_steps: 100
-  freeze_model: true
-  scheduler: cosine
-  memory_token_num: 10
+  warmup_steps: 1000
+  vae_name: sd_vae
+  vae_ckpt: stabilityai/sd-vae-ft-mse
 
 model:
   precision: bf16-mixed

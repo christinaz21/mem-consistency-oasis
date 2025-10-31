@@ -415,6 +415,7 @@ def retrieve_frame_idx_multiple(actions, retrieve_num, pred_action, similarity_f
         similarity = torch.norm(actions - pred_action, dim=-1)
     else:
         raise ValueError(f"unsupported similarity function: {similarity_func}")
+    similarity += 1e-5 * torch.arange(similarity.shape[-1], device=similarity.device).unsqueeze(0).unsqueeze(0)  # to ensure unique indices
     # similarity: (B, R, N)
     # retrieve the top-k most similar actions
     topk_idx = torch.topk(similarity, 1, dim=-1, largest=False).indices.squeeze(-1)  # (B, R)
@@ -444,7 +445,7 @@ def rag():
         oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-08/02-24-21/checkpoints/epoch=2-step=6000.ckpt"
     elif model_name == "rag_multi" or model_name == "rag_multi_pred_pose":
         # oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/2025-05-18/03-14-16/checkpoints/epoch=1-step=10000.ckpt"
-        oasis_ckpt = "outputs/checkpoints/anjian/18-43-16/checkpoints/epoch=0-step=38000.ckpt"
+        oasis_ckpt = "/home/tc0786/Project/train-oasis/outputs/checkpoints/anjian/18-43-16/checkpoints/epoch=0-step=38000.ckpt"
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     window_size = 20
@@ -532,6 +533,7 @@ def rag():
             actions_path = info["action_path"]
             actions = load_actions(actions_path, action_offset=video_offset)[:, :total_frames]
             assert actions.shape[1] == total_frames, f"{actions.shape[1]} != {total_frames}"
+            actions[:, 1:, 4:] = actions[:, 1:, 4:] - actions[:, 1, 4:]
 
             prompts.append(x)
             all_actions.append(actions)

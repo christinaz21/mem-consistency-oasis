@@ -22,21 +22,20 @@ from utils import (
     convert_zero_ckpt_into_state_dict,
     WarmUpScheduler
 )
+from transformers import get_cosine_schedule_with_warmup
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 import torch.distributed as dist
-import os
 
-class DiffusionForcingVideo(pl.LightningModule):
+class DiffusionForcingMemoryTokenVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
         self.vae_name = cfg.vae_name
-        self.max_vae_batch = cfg.max_vae_batch
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
@@ -55,6 +54,11 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
         self.predict_v = cfg.diffusion.predict_v
+
+        self.scheduler = cfg.scheduler
+        # memory token
+        self.freeze_model = cfg.freeze_model
+        self.memory_token_num = cfg.memory_token_num
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -85,7 +89,7 @@ class DiffusionForcingVideo(pl.LightningModule):
 
     def _build_model(self, model_ckpt):
         if self.model_cfg.architecture == "oasis_dit":
-            from train_oasis.model.dit import DiT
+            from train_oasis.model.memory_token_dit import DiT
             self.diffusion_model = DiT(
                 input_h=self.model_cfg.input_h,
                 input_w=self.model_cfg.input_w,
@@ -97,136 +101,35 @@ class DiffusionForcingVideo(pl.LightningModule):
                 mlp_ratio=self.model_cfg.mlp_ratio,
                 external_cond_dim=self.external_cond_dim,
                 max_frames=self.cfg.n_frames,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "sora_dit":
-            from train_oasis.model.open_sora_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                use_causal_mask=self.model_cfg.use_causal_mask,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "mla_dit":
-            from train_oasis.model.mla_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                lora_rank=self.model_cfg.lora_rank,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "lstm_dit":
-            from train_oasis.model.lstm_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                lstm_dropout=self.model_cfg.lstm_dropout,
-                lstm_layer_num=self.model_cfg.lstm_layer_num,
-                inner_window_size=self.model_cfg.inner_window_size,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "mamba_dit":
-            from train_oasis.model.mamba_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                mamba_d_state=self.model_cfg.mamba_d_state,
-                mamba_d_conv=self.model_cfg.mamba_d_conv,
-                mamba_expand=self.model_cfg.mamba_expand,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "rnn_chunk":
-            from train_oasis.model.rnn_chunk_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.model_cfg.inner_window_size,
-                rnn_config=self.model_cfg.rnn_config,
                 gradient_checkpointing=self.model_cfg.gradient_checkpointing,
                 dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
             )
         else:
             raise ValueError(f"Unsupported model {self.model_cfg._name}.")
-        
+        self.memory_token = torch.nn.Parameter(torch.randn(self.model_cfg.depth, 1, self.memory_token_num, self.model_cfg.input_h // self.model_cfg.patch_size, self.model_cfg.input_w // self.model_cfg.patch_size, self.model_cfg.hidden_size)) # (D, 1, M, H, W, C)
+        torch.nn.init.trunc_normal_(self.memory_token, std=0.02)
+        self.memory_token.requires_grad = True
+
         if model_ckpt:
+            from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
             print(f"Loading Diffusion model from {model_ckpt}")
-            sft_rnn = self.model_cfg.get("sft_rnn", False)
-            if self.model_cfg.architecture == "rnn_chunk" and sft_rnn:
-                strict_load = False
+            ckpt = get_fp32_state_dict_from_zero_checkpoint(model_ckpt)
+            state_dict = {}
+            for key, value in ckpt.items():
+                if key.startswith("diffusion_model."):
+                    state_dict[key[16:]] = value
+            self.diffusion_model.load_state_dict(state_dict, strict=True)
+
+            if "memory_token" in ckpt:
+                print("Loading memory token from checkpoint.")
+                self.memory_token.data = ckpt["memory_token"]
             else:
-                strict_load = True
-            if os.path.isdir(model_ckpt):
-                state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
-                self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
-            elif model_ckpt.endswith(".ckpt"):
-                ckpt = torch.load(model_ckpt, map_location="cpu")
-                state_dict = {}
-                for key, value in ckpt['state_dict'].items():
-                    if key.startswith("diffusion_model."):
-                        state_dict[key[16:]] = value
-                self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
-            else:
-                state_dict = torch.load(model_ckpt, map_location="cpu")
-                self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
-            if self.model_cfg.architecture == "rnn_chunk" and sft_rnn:
-                trainable_param_names = ["rnn", "r_norm", "r_adaLN_modulation", "combine_action_proj", "external_cond", "final_layer"]
-                for name, param in self.diffusion_model.named_parameters():
-                    if any([tp_name in name for tp_name in trainable_param_names]):
-                        param.requires_grad = True
-                    else:
-                        param.requires_grad = False
-                
-                if self.global_rank == 0:
-                    print("Only finetuning the RNN parameters.")
-                    for name, param in self.diffusion_model.named_parameters():
-                        if param.requires_grad:
-                            print(f"Trainable parameter: {name}, shape: {param.shape}")
-                        else:
-                            print(f"Frozen parameter: {name}, shape: {param.shape}")
+                print("No memory token in checkpoint, using random initialization.")
+
+        if self.freeze_model:
+            print("Freezing diffusion model...")
+            for param in self.diffusion_model.parameters():
+                param.requires_grad = False
         
         if self.cfg.vae_name == "oasis":
             from train_oasis.model.vae import AutoencoderKL
@@ -283,18 +186,43 @@ class DiffusionForcingVideo(pl.LightningModule):
         register_buffer("clipped_snr", clipped_snr)
 
     def configure_optimizers(self):
-        params = tuple(self.diffusion_model.parameters())
+        if self.freeze_model:
+            params = (self.memory_token,)
+        else:
+            params = tuple(self.diffusion_model.parameters()) + (self.memory_token,)
         if self.cfg.strategy == "ddp":
             optimizer_dynamics = torch.optim.AdamW(
                 params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            # scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            if self.scheduler == "cosine":
+                scheduler = get_cosine_schedule_with_warmup(
+                    optimizer_dynamics,
+                    num_warmup_steps=self.cfg.warmup_steps,
+                    num_training_steps=self.trainer.estimated_stepping_batches,
+                )
+                if self.trainer.is_global_zero:
+                    print(f"Estimated stepping batches: {self.trainer.estimated_stepping_batches}")
+            elif self.scheduler == "warmup":
+                scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            else:
+                raise ValueError(f"Unsupported scheduler {self.scheduler}.")
             return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         elif self.cfg.strategy == "deepspeed":
             optimizer_dynamics = DeepSpeedCPUAdam(
                 params, lr=self.cfg.lr, weight_decay=self.cfg.weight_decay, betas=self.cfg.optimizer_beta
             )
-            scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            # scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
+            if self.scheduler == "cosine":
+                scheduler = get_cosine_schedule_with_warmup(
+                    optimizer_dynamics,
+                    num_warmup_steps=self.cfg.warmup_steps,
+                    num_training_steps=self.trainer.estimated_stepping_batches,
+                )
+                if self.trainer.is_global_zero:
+                    print(f"Estimated stepping batches: {self.trainer.estimated_stepping_batches}")
+            elif self.scheduler == "warmup":
+                scheduler = WarmUpScheduler(optimizer_dynamics, self.cfg)
             return [optimizer_dynamics], [{"scheduler": scheduler, "interval": "step"}]
         else:
             raise ValueError(f"Unsupported strategy {self.cfg.strategy}.")
@@ -304,7 +232,12 @@ class DiffusionForcingVideo(pl.LightningModule):
         optimizer.step(closure=optimizer_closure)
 
     def lr_scheduler_step(self, scheduler, metric):
-        scheduler.step(step=self.trainer.global_step)
+        if self.scheduler == "cosine":
+            scheduler.step()
+        elif self.scheduler == "warmup":
+            scheduler.step(step=self.trainer.global_step)
+        else:
+            raise ValueError(f"Unsupported scheduler {self.scheduler}.")
 
     def compute_loss_weights(self, noise_levels: torch.Tensor):
         snr = self.snr[noise_levels]
@@ -354,15 +287,18 @@ class DiffusionForcingVideo(pl.LightningModule):
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
         noise_levels = self._generate_noise_levels(xs, masks)
         noised_x = self.q_sample(x_start=xs, t=noise_levels, noise=noise)
+        # concat memory token
+        bsz = noised_x.shape[1]
+        memory_token = self.memory_token.repeat(1, bsz, 1, 1, 1, 1) # (D, B, M, H, W, C)
         model_pred = self.diffusion_model(
             x=rearrange(noised_x, "t b ... -> b t ..."),
             t=rearrange(noise_levels, "t b -> b t"),
+            memories=memory_token,
             external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
         )
         model_pred = rearrange(model_pred, "b t ... -> t b ...")
         nan_number = torch.isnan(model_pred).sum()
-        if dist.is_initialized():
-            dist.all_reduce(nan_number, op=dist.ReduceOp.SUM)
+        dist.all_reduce(nan_number, op=dist.ReduceOp.SUM)
         if nan_number != 0:
             loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
             self.global_nan_number += 1
@@ -642,13 +578,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         elif self.vae_name == "sd_vae":
             batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
             x = rearrange(x, "b t ... -> (b t) ...")
-            all_outputs = []
-            for start_idx in range(0, x.shape[0], self.max_vae_batch):
-                end_idx = min(start_idx + self.max_vae_batch, x.shape[0])
-                x_chunk = x[start_idx:end_idx]
-                x_chunk = self.vae.encode(x_chunk).latent_dist.sample() * self.vae.config.scaling_factor
-                all_outputs.append(x_chunk)
-            x = torch.cat(all_outputs, 0)
+            x = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
             x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
             return x
         else:

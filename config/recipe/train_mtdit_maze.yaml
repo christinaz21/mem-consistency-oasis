@@ -1,7 +1,7 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/df/memory_token_100_10
+    dir: outputs/df/maze_pos_100_mt10
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
@@ -20,20 +20,17 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: memory_token_100_10
+name: maze_pos_100_mt10
 
 experiment:
-  model_ckpt: outputs/df/maze_100_mt10/checkpoints/epoch=0-step=40000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
-    lr: 2e-3
-    optim:
-      accumulate_grad_batches: 4
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 48
-    max_epochs: 3000
+    batch_size: 64
+    max_epochs: 1
     checkpointing:
       every_n_train_steps: 1000
   validation:
@@ -45,17 +42,14 @@ experiment:
     val_every_n_step: null
 
 dataset:
-  pre_load: true
+  pre_load: false
   n_frames: 100
-  metadata:
-    - /home/tc0786/Project/train-oasis/data/maze/metadata.json
-  limit_video_length:
-    - 1
+  external_cond_dim: 10
+  action_types: [action, agent_pos, agent_dir]
 
 algorithm:
-  warmup_steps: 100
-  freeze_model: true
-  scheduler: cosine
+  warmup_steps: 1000
+  freeze_model: false
   memory_token_num: 10
 
 model:

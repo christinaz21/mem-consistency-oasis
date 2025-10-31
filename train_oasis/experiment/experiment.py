@@ -6,7 +6,10 @@ from train_oasis.dataset.minecraft_easy import MinecraftEasyDataset
 from train_oasis.dataset.minecraft_pos import MinecraftPosDataset
 from train_oasis.dataset.latent_pos import LatentPosDataset
 from train_oasis.dataset.maze import MazeDataset
+from train_oasis.dataset.scannet import ScannetDataset
 from train_oasis.trainer.DF_Trainer import DiffusionForcingVideo
+from train_oasis.trainer.DF_RNN_Trainer import DiffusionForcingRNNVideo
+from train_oasis.trainer.DF_Memory_Token_Trainer import DiffusionForcingMemoryTokenVideo
 from train_oasis.trainer.Attn_Mem_Trainer import AttentionMemoryTrainer
 from train_oasis.trainer.DF_GAN_Trainer import DFGANVideo
 from train_oasis.trainer.SFP_Trainer import SingleFramePrediction
@@ -41,6 +44,8 @@ class VideoPredictionExperiment:
 
     compatible_algorithms = dict(
         df_video=DiffusionForcingVideo,
+        df_rnn_video=DiffusionForcingRNNVideo,
+        df_mt_video=DiffusionForcingMemoryTokenVideo,
         attn_mem_video=AttentionMemoryTrainer,
         df_gan=DFGANVideo,
         sfp=SingleFramePrediction,
@@ -60,6 +65,7 @@ class VideoPredictionExperiment:
         minecraft_pos=MinecraftPosDataset,
         latent_pos=LatentPosDataset,
         maze=MazeDataset,
+        scannet=ScannetDataset,
     )
 
     def __init__(

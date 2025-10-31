@@ -1,4 +1,8 @@
 # configuration parsing starts here
+hydra:
+  run:
+    dir: outputs/df/latent_rag_origin
+
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: latent_pos # dataset yaml file name in configurations/dataset folder [fixme]
@@ -20,7 +24,7 @@ name: latent_rag_origin
 
 experiment:
   seed: 42
-  model_ckpt: null # path to a pre-trained diffusion checkpoint
+  model_ckpt: outputs/checkpoints/anjian/18-43-16/checkpoints/epoch=0-step=38000.ckpt # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed

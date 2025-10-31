@@ -1,13 +1,13 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/df/memory_token_100_10
+    dir: outputs/rnn/lstm_maze_pos
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
   - dataset: maze # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: df_mt_video # algorithm yaml file name in configurations/algorithm folder [fixme]
-  - model: latent_maze_dit # model yaml file name in configurations/model folder [fixme]
+  - algorithm: df_rnn_video # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: rnn_lstm_maze # model yaml file name in configurations/model folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
@@ -20,43 +20,35 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: memory_token_100_10
+name: lstm_maze_pos
 
 experiment:
-  model_ckpt: outputs/df/maze_100_mt10/checkpoints/epoch=0-step=40000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: null # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
-    lr: 2e-3
-    optim:
-      accumulate_grad_batches: 4
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 48
-    max_epochs: 3000
+    batch_size: 8
+    max_epochs: 10
     checkpointing:
-      every_n_train_steps: 1000
+      every_n_train_steps: 407
   validation:
     precision: bf16-mixed
     strategy: deepspeed
-    batch_size: 4
+    batch_size: 8
     limit_batch: 1
-    val_every_n_epoch: 5000
     val_every_n_step: null
+    val_every_n_epoch: 5000
+  
+algorithm:
+  warmup_steps: 20
+  training_chunk_num: 64
+  lstm_mini_batch_size: 128
+  training_mini_batch_size: 8
 
 dataset:
-  pre_load: true
-  n_frames: 100
-  metadata:
-    - /home/tc0786/Project/train-oasis/data/maze/metadata.json
-  limit_video_length:
-    - 1
-
-algorithm:
-  warmup_steps: 100
-  freeze_model: true
-  scheduler: cosine
-  memory_token_num: 10
-
-model:
-  precision: bf16-mixed
+  pre_load: false
+  n_frames: 1001
+  external_cond_dim: 10
+  action_types: [action, agent_pos, agent_dir]

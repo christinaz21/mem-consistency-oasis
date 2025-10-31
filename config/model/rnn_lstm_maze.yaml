@@ -1,0 +1,17 @@
+input_h: &h 8
+input_w: &w 8
+patch_size: 2
+in_channels: &c 4
+hidden_size: 1024
+depth: 12
+num_heads: 16
+mlp_ratio: 4.0
+inner_window_size: 20
+gradient_checkpointing: true
+observation_shape: [*c, *h, *w]
+precision: bf16-mixed
+rnn_config:
+  rnn_type: LSTM
+  hidden_size: 1024
+  num_layers: 1
+  dropout: 0.0

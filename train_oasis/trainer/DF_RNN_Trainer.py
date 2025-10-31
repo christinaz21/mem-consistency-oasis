@@ -27,16 +27,16 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 import torch.distributed as dist
+import time
 import os
 
-class DiffusionForcingVideo(pl.LightningModule):
+class DiffusionForcingRNNVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
         super().__init__()
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.x_shape = cfg.x_shape
         self.vae_name = cfg.vae_name
-        self.max_vae_batch = cfg.max_vae_batch
         self.context_frames = cfg.context_frames
         self.chunk_size = cfg.chunk_size
         self.external_cond_dim = cfg.external_cond_dim
@@ -55,6 +55,15 @@ class DiffusionForcingVideo(pl.LightningModule):
         self.snr_clip = cfg.diffusion.snr_clip
         self.scaling_factor = cfg.scaling_factor
         self.predict_v = cfg.diffusion.predict_v
+
+        # rnn only
+        self.clean_frame_noise_range = cfg.diffusion.clean_frame_noise_range
+        self.training_chunk_num = cfg.training_chunk_num
+        self.model_inner_window_size = model_cfg.inner_window_size
+        self.select_start_frame = cfg.get("select_start_frame", 0)
+
+        self.lstm_mini_batch_size = cfg.lstm_mini_batch_size
+        self.training_mini_batch_size = cfg.training_mini_batch_size
         
         self._build_model(model_ckpt)
         self._build_buffer()
@@ -84,121 +93,27 @@ class DiffusionForcingVideo(pl.LightningModule):
 
 
     def _build_model(self, model_ckpt):
-        if self.model_cfg.architecture == "oasis_dit":
-            from train_oasis.model.dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "sora_dit":
-            from train_oasis.model.open_sora_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                use_causal_mask=self.model_cfg.use_causal_mask,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "mla_dit":
-            from train_oasis.model.mla_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                lora_rank=self.model_cfg.lora_rank,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "lstm_dit":
-            from train_oasis.model.lstm_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                lstm_dropout=self.model_cfg.lstm_dropout,
-                lstm_layer_num=self.model_cfg.lstm_layer_num,
-                inner_window_size=self.model_cfg.inner_window_size,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "mamba_dit":
-            from train_oasis.model.mamba_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.cfg.n_frames,
-                mamba_d_state=self.model_cfg.mamba_d_state,
-                mamba_d_conv=self.model_cfg.mamba_d_conv,
-                mamba_expand=self.model_cfg.mamba_expand,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        elif self.model_cfg.architecture == "rnn_chunk":
-            from train_oasis.model.rnn_chunk_dit import DiT
-            self.diffusion_model = DiT(
-                input_h=self.model_cfg.input_h,
-                input_w=self.model_cfg.input_w,
-                patch_size=self.model_cfg.patch_size,
-                in_channels=self.model_cfg.in_channels,
-                hidden_size=self.model_cfg.hidden_size,
-                depth=self.model_cfg.depth,
-                num_heads=self.model_cfg.num_heads,
-                mlp_ratio=self.model_cfg.mlp_ratio,
-                external_cond_dim=self.external_cond_dim,
-                max_frames=self.model_cfg.inner_window_size,
-                rnn_config=self.model_cfg.rnn_config,
-                gradient_checkpointing=self.model_cfg.gradient_checkpointing,
-                dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
-            )
-        else:
-            raise ValueError(f"Unsupported model {self.model_cfg._name}.")
+        from train_oasis.model.rnn_dit import DiT
+        self.diffusion_model = DiT(
+            input_h=self.model_cfg.input_h,
+            input_w=self.model_cfg.input_w,
+            patch_size=self.model_cfg.patch_size,
+            in_channels=self.model_cfg.in_channels,
+            hidden_size=self.model_cfg.hidden_size,
+            depth=self.model_cfg.depth,
+            num_heads=self.model_cfg.num_heads,
+            mlp_ratio=self.model_cfg.mlp_ratio,
+            external_cond_dim=self.external_cond_dim,
+            max_frames=self.model_cfg.inner_window_size,
+            rnn_config=self.model_cfg.rnn_config,
+            gradient_checkpointing=self.model_cfg.gradient_checkpointing,
+            dtype=torch.bfloat16 if "bf16" in self.model_cfg.precision else torch.float32,
+        )
         
         if model_ckpt:
             print(f"Loading Diffusion model from {model_ckpt}")
             sft_rnn = self.model_cfg.get("sft_rnn", False)
-            if self.model_cfg.architecture == "rnn_chunk" and sft_rnn:
-                strict_load = False
-            else:
-                strict_load = True
+            strict_load = True if not sft_rnn else False
             if os.path.isdir(model_ckpt):
                 state_dict = convert_zero_ckpt_into_state_dict(model_ckpt)
                 self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
@@ -212,14 +127,14 @@ class DiffusionForcingVideo(pl.LightningModule):
             else:
                 state_dict = torch.load(model_ckpt, map_location="cpu")
                 self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
-            if self.model_cfg.architecture == "rnn_chunk" and sft_rnn:
-                trainable_param_names = ["rnn", "r_norm", "r_adaLN_modulation", "combine_action_proj", "external_cond", "final_layer"]
+            if sft_rnn and False:
+                trainable_param_names = ["rnn", "r_norm", "r_adaLN_modulation", "combine_action_proj", "external_cond"]
                 for name, param in self.diffusion_model.named_parameters():
                     if any([tp_name in name for tp_name in trainable_param_names]):
                         param.requires_grad = True
                     else:
                         param.requires_grad = False
-                
+
                 if self.global_rank == 0:
                     print("Only finetuning the RNN parameters.")
                     for name, param in self.diffusion_model.named_parameters():
@@ -227,7 +142,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                             print(f"Trainable parameter: {name}, shape: {param.shape}")
                         else:
                             print(f"Frozen parameter: {name}, shape: {param.shape}")
-        
+
         if self.cfg.vae_name == "oasis":
             from train_oasis.model.vae import AutoencoderKL
             from safetensors.torch import load_model
@@ -346,41 +261,172 @@ class DiffusionForcingVideo(pl.LightningModule):
             - extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
         )
 
+    def concat_hidden_states(self, hidden_states_list, batch_size, C, H, W):
+        """
+        Concatenate hidden states from a list of hidden states.
+        LSTM:
+            hidden_states_list: (num_frames, layer_num, ), each element is (h, c) for LSTM or h for GRU.
+                h: (l, BHW, D)
+            return: (layer_num, (BHW, T, D)) for LSTM.
+        Mamba2:
+            pass
+        TTT:
+            hidden_states_list: (num_frames, layer_num, ), each element is dict() for TTT.
+                dict(): {
+                    "W1_states": (BHW, D, D, D),
+                    "b1_states": (BHW, D, 1, D),
+                    "W1_grad": (BHW, D, D, D),
+                    "b1_grad": (BHW, D, 1, D),
+                }
+            return: (layer_num, (BHW, T, D)) for TTT.
+        """
+        if self.model_cfg.rnn_config.rnn_type == "LSTM":
+            return [
+                (
+                    rearrange(torch.cat([
+                        rearrange(hidden_states_list[frame][layer][0], "l (b h w) d -> l b h w d", b=batch_size, h=H // self.model_cfg.patch_size, w=W // self.model_cfg.patch_size, l=self.model_cfg.rnn_config.num_layers)
+                        for frame in range(len(hidden_states_list))
+                    ], dim=1), "l b h w d -> l (b h w) d", b=batch_size * len(hidden_states_list), h=H // self.model_cfg.patch_size, w=W // self.model_cfg.patch_size, l=self.model_cfg.rnn_config.num_layers),
+                    rearrange(torch.cat([
+                        rearrange(hidden_states_list[frame][layer][1], "l (b h w) d -> l b h w d", b=batch_size, h=H // self.model_cfg.patch_size, w=W // self.model_cfg.patch_size, l=self.model_cfg.rnn_config.num_layers)
+                        for frame in range(len(hidden_states_list))
+                    ], dim=1), "l b h w d -> l (b h w) d", b=batch_size * len(hidden_states_list), h=H // self.model_cfg.patch_size, w=W // self.model_cfg.patch_size, l=self.model_cfg.rnn_config.num_layers),
+                )
+                for layer in range(len(hidden_states_list[0]))
+            ]
+        elif self.model_cfg.rnn_config.rnn_type == "Mamba2":
+            return [
+                (
+                    torch.cat([
+                        hidden_states_list[frame][layer][0] for frame in range(len(hidden_states_list))
+                    ], dim=0),
+                    torch.cat([
+                        hidden_states_list[frame][layer][1] for frame in range(len(hidden_states_list))
+                    ], dim=0),
+                ) for layer in range(len(hidden_states_list[0]))
+            ]
+        elif self.model_cfg.rnn_config.rnn_type == "TTT":
+            assert hidden_states_list[0][0]["W1_states"].shape[0] == (H // self.model_cfg.patch_size) * (W // self.model_cfg.patch_size) * batch_size, \
+                f"Expected hidden state shape {(H // self.model_cfg.patch_size) * (W // self.model_cfg.patch_size) * batch_size, self.model_cfg.rnn_config.hidden_size}, but got {hidden_states_list[0][0]['W1_states'].shape}"
+            return [
+                {
+                    "W1_states": torch.cat([
+                        hidden_states_list[frame][layer]["W1_states"] for frame in range(len(hidden_states_list))
+                    ], dim=0), # (T * BHW, D, D, D)
+                    "b1_states": torch.cat([hidden_states_list[frame][layer]["b1_states"] for frame in range(len(hidden_states_list))], dim=0), # (T * BHW, D, 1, D)
+                    "W1_grad": torch.cat([hidden_states_list[frame][layer]["W1_grad"] for frame in range(len(hidden_states_list))], dim=0), # (T * BHW, D, D, D)
+                    "b1_grad": torch.cat([hidden_states_list[frame][layer]["b1_grad"] for frame in range(len(hidden_states_list))], dim=0), # (T * BHW, D, 1, D)
+                }
+                for layer in range(len(hidden_states_list[0]))
+            ]
+        else:
+            raise NotImplementedError(f"RNN type {self.model_cfg.rnn_config.rnn_type} not implemented.")
+
+
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
+        DEBUG = False
+        if self.global_rank == 0 and DEBUG:
+            print("Start training step")
+            start_time = time.time()
         xs, conditions, masks = self._preprocess_batch(batch)
         xs_gt = xs.clone()
         xs = self.vae_encode(xs)
+        if self.global_rank == 0 and DEBUG:
+            print(f"Encoded VAE in {time.time() - start_time:.2f} seconds")
+            start_time = time.time()
+        num_frames, batch_size, C, H, W = xs.shape
         noise = torch.randn_like(xs)
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
         noise_levels = self._generate_noise_levels(xs, masks)
         noised_x = self.q_sample(x_start=xs, t=noise_levels, noise=noise)
-        model_pred = self.diffusion_model(
-            x=rearrange(noised_x, "t b ... -> b t ..."),
-            t=rearrange(noise_levels, "t b -> b t"),
-            external_cond=rearrange(conditions, "t b ... -> b t ...") if conditions is not None else None,
-        )
-        model_pred = rearrange(model_pred, "b t ... -> t b ...")
-        nan_number = torch.isnan(model_pred).sum()
-        if dist.is_initialized():
+
+        # get clean frame
+        with torch.no_grad():
+            clean_noise_levels = torch.randint(self.clean_frame_noise_range[0], self.clean_frame_noise_range[1], (num_frames, batch_size), device=xs.device)
+            clean_noised_x = self.q_sample(x_start=xs, t=clean_noise_levels, noise=torch.clamp(torch.randn_like(xs), -self.clip_noise, self.clip_noise))
+            clean_noise_levels = torch.full_like(clean_noise_levels, self.stabilization_level - 1, device=xs.device)
+
+        if self.global_rank == 0 and DEBUG:
+            print(f"Generated noise in {time.time() - start_time:.2f} seconds")
+            start_time = time.time()
+        
+        # get all hidden states
+        all_selected_indices = torch.randperm(num_frames - self.model_inner_window_size - self.select_start_frame, device=noised_x.device)[:self.training_chunk_num] + 1 + self.select_start_frame # do not select the first frame
+        # sort indices in ascending order
+        all_selected_indices, _ = torch.sort(all_selected_indices)
+        all_hidden_states = self.diffusion_model.window_size_1_forward(
+            x=rearrange(clean_noised_x[:num_frames - self.model_inner_window_size], "t b ... -> b t ..."),
+            t=rearrange(clean_noise_levels[:num_frames - self.model_inner_window_size], "t b -> b t"),
+            external_cond=rearrange(conditions[:num_frames - self.model_inner_window_size], "t b ... -> b t ...") if conditions is not None else None,
+            hidden_states=None,
+            mini_batch_size=self.lstm_mini_batch_size,
+            target_hidden_states=all_selected_indices,
+        ) # (t - window_size + 1, )
+
+        if self.global_rank == 0 and DEBUG:
+            print(f"Got hidden states in {time.time() - start_time:.2f} seconds")
+            start_time = time.time()
+
+        all_loss = []
+        nan_number = torch.tensor(0, dtype=torch.float, device=self.device)
+
+        for i in range(0, self.training_chunk_num, self.training_mini_batch_size):
+            selected_indices = all_selected_indices[i : i + self.training_mini_batch_size] # (chunk_num, )
+            selected_hidden_states = all_hidden_states[i : i + self.training_mini_batch_size] # (chunk_num, layer_num, )
+            batched_hidden_states = self.concat_hidden_states(selected_hidden_states, batch_size, C, H, W)
+
+            batched_noised_x = torch.cat([
+                noised_x[idx : idx + self.model_inner_window_size] for idx in selected_indices
+            ], dim=1) # (t, b * chunk_num, c, h, w)
+            batched_noise_levels = torch.cat([
+                noise_levels[idx : idx + self.model_inner_window_size] for idx in selected_indices
+            ], dim=1) # (t, b * chunk_num)
+            batched_conditions = torch.cat([
+                conditions[idx : idx + self.model_inner_window_size] for idx in selected_indices
+            ], dim=1) if conditions is not None else None
+            batched_masks = torch.cat([
+                masks[idx : idx + self.model_inner_window_size] for idx in selected_indices
+            ], dim=1) if masks is not None else None
+            batched_targets = torch.cat([
+                xs[idx : idx + self.model_inner_window_size] for idx in selected_indices
+            ], dim=1) # (t, b * chunk_num, c, h, w)
+            batched_noise = torch.cat([
+                noise[idx : idx + self.model_inner_window_size] for idx in selected_indices
+            ], dim=1) # (t, b * chunk_num, c, h, w)
+
+            model_pred, _ = self.diffusion_model(
+                x=rearrange(batched_noised_x, "t b ... -> b t ..."),
+                t=rearrange(batched_noise_levels, "t b -> b t"),
+                external_cond=rearrange(batched_conditions, "t b ... -> b t ...") if conditions is not None else None,
+                hidden_states=batched_hidden_states,
+            )
+            model_pred = rearrange(model_pred, "b t ... -> t b ...")
+            nan_number += torch.sum(torch.isnan(model_pred))
             dist.all_reduce(nan_number, op=dist.ReduceOp.SUM)
-        if nan_number != 0:
-            loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
-            self.global_nan_number += 1
-            self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
-            output_dict = {
-                "loss": loss,
-            }
-            return output_dict
-        else:
-            if self.predict_v:
-                target = self.predict_v_from_x(xs, noise_levels, noise)
+            if nan_number != 0:
+                loss = torch.tensor(0.0, dtype=xs_gt.dtype, requires_grad=True, device=self.device)
+                self.global_nan_number += 1
+                self.log("training/nan", self.global_nan_number, sync_dist=True, prog_bar=True)
+                output_dict = {
+                    "loss": loss,
+                }
+                return output_dict
             else:
-                target = xs
-            loss = F.mse_loss(model_pred, target.detach(), reduction="none")
-            loss_weight = self.compute_loss_weights(noise_levels)
-            loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
-            loss = loss * loss_weight
-            loss = self.reweight_loss(loss, masks)
+                if self.predict_v:
+                    target = self.predict_v_from_x(batched_targets, batched_noise_levels, batched_noise)
+                else:
+                    target = batched_targets
+                loss = F.mse_loss(model_pred, target.detach(), reduction="none")
+                loss_weight = self.compute_loss_weights(batched_noise_levels)
+                loss_weight = loss_weight.view(*loss_weight.shape, *((1,) * (loss.ndim - 2)))
+                loss = loss * loss_weight
+                loss = self.reweight_loss(loss, batched_masks)
+                all_loss.append(loss)
+
+        loss = torch.stack(all_loss).mean()
+
+        if self.global_rank == 0 and DEBUG:
+            print(f"Got loss in {time.time() - start_time:.2f} seconds")
         
         # log the loss
         self.log("training/loss", loss, sync_dist=True, prog_bar=True)
@@ -405,78 +451,11 @@ class DiffusionForcingVideo(pl.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
-        xs, conditions, masks = self._preprocess_batch(batch)
-        xs_gt = xs.clone()
-        xs = self.vae_encode(xs)
-        n_frames, batch_size, *_ = xs.shape
-        curr_frame = 0
-
-        # context
-        n_context_frames = self.context_frames
-        xs_pred = xs[:n_context_frames].clone()
-        curr_frame += n_context_frames
-
-        pbar = tqdm(total=n_frames, initial=curr_frame, desc="Sampling")
-        while curr_frame < n_frames:
-            if self.chunk_size > 0:
-                horizon = min(n_frames - curr_frame, self.chunk_size)
-            else:
-                horizon = n_frames - curr_frame
-            assert horizon <= self.n_frames, "horizon exceeds the number of tokens."
-            scheduling_matrix = self._generate_scheduling_matrix(horizon)
-
-            chunk = torch.randn((horizon, batch_size, *self.x_shape), device=self.device, dtype=xs_pred.dtype)
-            chunk = torch.clamp(chunk, -self.clip_noise, self.clip_noise)
-            xs_pred = torch.cat([xs_pred, chunk], 0)
-
-            # sliding window: only input the last n_frames frames
-            start_frame = max(0, curr_frame + horizon - self.n_frames)
-
-            pbar.set_postfix(
-                {
-                    "start": start_frame,
-                    "end": curr_frame + horizon,
-                }
-            )
-
-            for m in range(scheduling_matrix.shape[0] - 1):
-                from_noise_levels = np.concatenate((np.zeros((curr_frame,), dtype=np.int64), scheduling_matrix[m]))[
-                    :, None
-                ].repeat(batch_size, axis=1)
-                to_noise_levels = np.concatenate(
-                    (
-                        np.zeros((curr_frame,), dtype=np.int64),
-                        scheduling_matrix[m + 1],
-                    )
-                )[
-                    :, None
-                ].repeat(batch_size, axis=1)
-
-                from_noise_levels = torch.from_numpy(from_noise_levels).to(self.device)
-                to_noise_levels = torch.from_numpy(to_noise_levels).to(self.device)
-
-                # update xs_pred by DDIM or DDPM sampling
-                # input frames within the sliding window
-                xs_pred[start_frame:] = self.sample_step(
-                    xs_pred[start_frame:],
-                    conditions[start_frame : curr_frame + horizon] if conditions is not None else None,
-                    from_noise_levels[start_frame:],
-                    to_noise_levels[start_frame:],
-                )
-
-            curr_frame += horizon
-            pbar.update(horizon)
-
-        # FIXME: loss
-        loss = F.mse_loss(xs_pred, xs, reduction="none")
-        loss = self.reweight_loss(loss, masks)
-
-
-        xs_gt = self._unnormalize_x(xs_gt)
-        xs_pred = self.vae_decode(xs_pred)
-        xs_pred = self._unnormalize_x(xs_pred)
-        self.validation_step_outputs.append((xs_pred.detach().cpu(), xs_gt.detach().cpu()))
-
+        output_dict = self.training_step(batch, batch_idx)
+        loss = output_dict["loss"]
+        self.log(
+            f"{namespace}/loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
+        )
         return loss
 
     def add_shape_channels(self, x):
@@ -487,106 +466,8 @@ class DiffusionForcingVideo(pl.LightningModule):
             self.sqrt_recipm1_alphas_cumprod, t, x_t.shape
         )
 
-    @torch.no_grad()
-    def sample_step(
-        self,
-        x: torch.Tensor,
-        external_cond: Optional[torch.Tensor],
-        curr_noise_level: torch.Tensor,
-        next_noise_level: torch.Tensor,
-    ):
-        real_steps = torch.linspace(-1, self.timesteps - 1, steps=self.sampling_timesteps + 1, device=x.device).long()
-
-        # convert noise levels (0 ~ sampling_timesteps) to real noise levels (-1 ~ timesteps - 1)
-        curr_noise_level = real_steps[curr_noise_level]
-        next_noise_level = real_steps[next_noise_level]
-
-        clipped_curr_noise_level = torch.where(
-            curr_noise_level < 0,
-            torch.full_like(curr_noise_level, self.stabilization_level - 1, dtype=torch.long),
-            curr_noise_level,
-        )
-
-        # treating as stabilization would require us to scale with sqrt of alpha_cum
-        orig_x = x.clone().detach()
-        scaled_context = self.q_sample(
-            x,
-            clipped_curr_noise_level,
-            noise=torch.zeros_like(x),
-        )
-        x = torch.where(self.add_shape_channels(curr_noise_level < 0), scaled_context, orig_x)
-
-        alpha_next = torch.where(
-            next_noise_level < 0,
-            torch.ones_like(next_noise_level),
-            self.alphas_cumprod[next_noise_level],
-        )
-        c = (1 - alpha_next).sqrt()
-
-        alpha_next = self.add_shape_channels(alpha_next)
-        c = self.add_shape_channels(c)
-
-        model_pred = self.diffusion_model(
-            x=rearrange(x, "t b ... -> b t ..."),
-            t=rearrange(clipped_curr_noise_level, "t b -> b t"),
-            external_cond=rearrange(external_cond, "t b ... -> b t ...") if external_cond is not None else None,
-        )
-        model_pred = rearrange(model_pred, "b t ... -> t b ...")
-        
-        if self.predict_v:
-            x_start = self.predict_start_from_v(x, clipped_curr_noise_level, model_pred)
-        else:
-            x_start = model_pred
-        pred_noise = self.predict_noise_from_start(x, clipped_curr_noise_level, x_start)
-
-        x_pred = x_start * alpha_next.sqrt() + pred_noise * c
-
-        # only update frames where the noise level decreases
-        mask = curr_noise_level == next_noise_level
-        x_pred = torch.where(
-            self.add_shape_channels(mask),
-            orig_x,
-            x_pred,
-        )
-
-        return x_pred
-    
     def on_validation_epoch_end(self, namespace="validation") -> None:
-        if not self.validation_step_outputs:
-            return
-        xs_pred = []
-        xs = []
-        for pred, gt in self.validation_step_outputs:
-            xs_pred.append(pred)
-            xs.append(gt)
-        xs_pred = torch.cat(xs_pred, 1)
-        xs = torch.cat(xs, 1)
-
-        if self.logger:
-            log_video(
-                xs_pred,
-                xs,
-                step=None if namespace == "test" else self.global_step,
-                namespace=namespace + "_vis",
-                context_frames=self.context_frames,
-                logger=self.logger.experiment,
-            )
-
-        metric_dict = get_validation_metrics_for_videos(
-            xs_pred[self.context_frames :],
-            xs[self.context_frames :],
-            lpips_model=self.validation_lpips_model,
-            fid_model=self.validation_fid_model,
-            fvd_model=(self.validation_fvd_model[0] if self.validation_fvd_model else None),
-        )
-        self.log_dict(
-            {f"{namespace}/{k}": v for k, v in metric_dict.items()},
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-        )
-
-        self.validation_step_outputs.clear()
+        return        
 
     def test_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
         return self.validation_step(*args, **kwargs, namespace="test")
@@ -642,13 +523,7 @@ class DiffusionForcingVideo(pl.LightningModule):
         elif self.vae_name == "sd_vae":
             batch_size, n_frames, c, h, w = x.shape # the order of the first two dimensions can be ignored
             x = rearrange(x, "b t ... -> (b t) ...")
-            all_outputs = []
-            for start_idx in range(0, x.shape[0], self.max_vae_batch):
-                end_idx = min(start_idx + self.max_vae_batch, x.shape[0])
-                x_chunk = x[start_idx:end_idx]
-                x_chunk = self.vae.encode(x_chunk).latent_dist.sample() * self.vae.config.scaling_factor
-                all_outputs.append(x_chunk)
-            x = torch.cat(all_outputs, 0)
+            x = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
             x = rearrange(x, "(b t) ... -> b t ...", b=batch_size, t=n_frames)
             return x
         else:

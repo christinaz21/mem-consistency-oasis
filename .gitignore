@@ -14,3 +14,5 @@ mc_dit/
 
 wandb/
 .vscode
+
+causal-conv1d/

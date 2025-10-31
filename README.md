@@ -1,5 +1,14 @@
 # Train oasis
 
+## Submit job
+
+```bash
+srun --nodes=1 --ntasks=1 --cpus-per-task=24 --mem=240G --constrain=gpu80 --gres=gpu:4 --time=00:60:00 --pty /bin/bash
+srun --nodes=1 --ntasks=1 --cpus-per-task=4 --mem=80G --partition=pli --account=oasis --gres=gpu:1 --time=00:60:00 --pty /bin/bash
+srun --nodes=1 --ntasks=1 --cpus-per-task=6 --mem=80G --constrain=gpu80 --gres=gpu:1 --time=00:60:00 --pty /bin/bash
+srun --nodes=1 --ntasks=1 --cpus-per-task=4 --mem=40G --gres=gpu:1 --time=00:60:00 --pty /bin/bash
+```
+
 ## Data setup
 
 Project Url: [GitHub - openai/Video-Pre-Training: Video PreTraining (VPT): Learning to Act by Watching Unlabeled Online Videos](https://github.com/openai/Video-Pre-Training)

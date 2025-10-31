@@ -12,10 +12,9 @@ chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion ch
 n_frames: ${dataset.n_frames}
 frame_skip: ${dataset.frame_skip}
 
-vae_name: oasis
-vae_ckpt: /home/tc0786/Project/train-oasis/models/oasis500m/vit-l-20.safetensors
-scaling_factor: 0.07843137255
-max_vae_batch: 512
+vae_name: sd_vae
+vae_ckpt: stabilityai/sd-vae-ft-mse
+scaling_factor: null
 
 # training hyperparameters
 weight_decay: 2e-3
@@ -24,6 +23,10 @@ optimizer_beta: [0.9, 0.99]
 strategy: ${experiment.training.strategy}
 
 save_video_every_n_step: 1000 # save a video every n train steps
+scheduler: warmup # cosine, warmup
+# memory token
+freeze_model: false
+memory_token_num: 1
 
 diffusion:
 # training
