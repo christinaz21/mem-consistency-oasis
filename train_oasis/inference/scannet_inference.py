@@ -181,10 +181,10 @@ def vanilla(args):
     all_metrics = []
     for info in paths:
         action_path = info["file"]
-        video_path = action_path.with_suffix(".mp4")
+        video_path = action_path.replace(".npy", ".mp4")
         start = Fraction(0, fps)
-        end = Fraction((total_length - 1), fps)
-        video, _, _ = read_video(str(video_path), start_pts=start, end_pts=end, pts_unit="sec")
+        end = Fraction(total_length - 1, fps)
+        video, _, _ = read_video(video_path, start_pts=start, end_pts=end, pts_unit="sec")
         video = video.contiguous().float() / 255.0
         assert video.shape[0] == total_length, f"video.shape[0]={video.shape[0]} != {total_length}"
         gt_videos.append(video)
