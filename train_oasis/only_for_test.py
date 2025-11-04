@@ -1,29 +1,37 @@
-import sys
-import os
-dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(dir_path)
-import torch
-from train_oasis.model.mamba_dit import Mamba2
+import json
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-rnn = Mamba2(
-    d_model=64,
-    d_state=16,
-    headdim=16,
-    device=device,
-)
+def get_metrics():
+    paths = [
+        "outputs/rnn/eval_outputs/metrics/df_ws20.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_combine_LSTM.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch4.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch5.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch6.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_aux_epoch3.json",
+    ]
 
-input_tensor = torch.randn(2, 32, 64, device=device)
+    for path in paths:
+        with open(path, 'r') as f:
+            all_metrics = json.load(f)
+        metrics = {}
+        for item in all_metrics:
+            prompt_frames = item["prompt_frames"]
+            for key, values in item["metrics"].items():
+                if key not in metrics:
+                    metrics[key] = []
+                metrics[key].extend(values[prompt_frames:])
+        avg_metrics = {key: sum(values) / len(values) for key, values in metrics.items()}
+        print(f"Metrics for {path}:")
+        for key, value in avg_metrics.items():
+            print(f"{key}: {value:.4f}")
+        print()
 
-b1 = rnn(input_tensor)
-
-b2 = []
-conv_state, ssm_state = rnn.allocate_inference_cache(input_tensor.shape[0], input_tensor.shape[1], dtype=input_tensor.dtype)
-for i in range(input_tensor.shape[1]):
-    out, conv_state, ssm_state = rnn.step(input_tensor[:, i:i+1, :], conv_state, ssm_state)
-    b2.append(out)
-
-b2 = torch.cat(b2, dim=1)
-
-print(b1)
-print(b2)
+if __name__ == "__main__":
+    get_metrics()

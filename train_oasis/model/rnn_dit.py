@@ -450,7 +450,7 @@ class DiT(nn.Module):
 
         return x, new_hidden_states
 
-    def window_size_1_forward(self, x, t, external_cond=None, hidden_states=None, mini_batch_size=256, target_hidden_states=None):
+    def window_size_1_forward(self, x, t, external_cond=None, hidden_states=None, mini_batch_size=256, target_hidden_states=None, get_return=False):
         """
         A faster forward pass of DiT with sliding window size 1.
         x: (B, T, C, H, W) tensor of spatial inputs
@@ -483,8 +483,19 @@ class DiT(nn.Module):
                 x, new_hidden_state = block.window_size_1_forward(x, c, hidden_state=hidden_state, mini_batch_size=mini_batch_size, target_hidden_states=target_hidden_states)  # (N, T, H, W, D)
             for t in range(len(target_hidden_states)):
                 all_hidden_states[t].append(new_hidden_state[t])
+        if not get_return:
+            return all_hidden_states
+        
+        if self.gradient_checkpointing and self.training:
+            x = checkpoint(self.final_layer, x, c, use_reentrant=False)
+        else:
+            x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
+        # unpatchify
+        x = rearrange(x, "b t h w d -> (b t) h w d")
+        x = self.unpatchify(x)  # (N, out_channels, H, W)
+        x = rearrange(x, "(b t) c h w -> b t c h w", t=T)
 
-        return all_hidden_states
+        return x, all_hidden_states
 
     def inference(self, x, t, external_cond=None, hidden_states=None, get_new_hidden_states=False):
         """

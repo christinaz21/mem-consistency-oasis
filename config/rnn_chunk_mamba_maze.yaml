@@ -1,7 +1,7 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/rnn/rnn_chunk_mamba_maze_pos_comb
+    dir: outputs/rnn/rnn_chunk_mamba_maze_pos
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
@@ -20,7 +20,7 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: rnn_chunk_mamba_maze_pos_comb
+name: rnn_chunk_mamba_maze_pos
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -54,5 +54,3 @@ dataset:
 
 model:
   architecture: rnn_chunk
-  rnn_config:
-    combine_action_dim: 128

@@ -27,11 +27,14 @@ experiment:
   model_ckpt: null
   tasks: [training]
   training:
+    lr: 2e-5
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 64
-    max_epochs: 1
+    batch_size: 16
+    max_epochs: 10
+    optim:
+      accumulate_grad_batches: 1
     checkpointing:
       every_n_train_steps: 400
   validation:
@@ -43,6 +46,6 @@ experiment:
     val_every_n_epoch: 50
 
 algorithm:
-  warmup_steps: 400
+  warmup_steps: 1000
   vae_name: sd_vae
   vae_ckpt: stabilityai/sd-vae-ft-mse

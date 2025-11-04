@@ -556,7 +556,7 @@ def vanilla(model_name, ckpt_path):
     from train_oasis.model.dit import DiT
 
     ddim_noise_steps = 50
-    window_size = 20
+    window_size = 200
     metadata_file_path = "data/maze/metadata_self.json"
     save_dir = os.path.join("outputs/rnn/eval_outputs", f"df_{model_name}")
     metrics_save_path = os.path.join("outputs/rnn/eval_outputs/metrics", f"df_{model_name}.json")
@@ -575,6 +575,7 @@ def vanilla(model_name, ckpt_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config_paths = {
         "ws20": "config/model/latent_maze_dit.yaml",
+        "ws200": "config/model/latent_maze_dit.yaml",
     }
     vae_ckpt = "stabilityai/sd-vae-ft-mse"
     if model_name not in config_paths:
@@ -984,26 +985,19 @@ def rnn_check_in_context(model_name, ckpt_path):
 
 def get_metrics():
     paths = [
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch1.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch2.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch3.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch4.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch5.json",
         "outputs/rnn/eval_outputs/metrics/df_ws20.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_TTT.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_combine_LSTM.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch3.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch1.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch2.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch3.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch4.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch5.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch6.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch1.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch2.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch3.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch4.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch5.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch6.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_aux_epoch3.json",
     ]
 
     for path in paths:
@@ -1024,6 +1018,7 @@ def get_metrics():
 
 if __name__ == "__main__":
     get_metrics()
-    # rnn_inference("LSTM_comb_pad_epoch1", "outputs/rnn/lstm_maze_pos_comb_pad/checkpoints/ckpt-epoch=0-step=815.ckpt")
-    # vanilla("ws20", "outputs/rnn/df_maze/checkpoints/epoch=0-step=36000.ckpt")
+    # rnn_inference("LSTM_comb_onemem_b256_epoch3", "outputs/rnn/lstm_maze_pos_comb_onemem_b256/checkpoints/ckpt-epoch=2-step=1221.ckpt")
+    # vanilla("ws200", "outputs/df/maze_200/checkpoints/epoch=0-step=54000.ckpt")
     # rnn_check_in_context("LSTM_comb_sft_unfreeze_epoch6", "outputs/rnn/lstm_maze_pos_comb_sft_unfreeze/checkpoints/ckpt-epoch=5-step=4890.ckpt")
+    # rnn_chunk_inference("TTT_comb_epoch1", "outputs/rnn/rnn_chunk_ttt_maze_pos_comb/checkpoints/ckpt-epoch=0-step=407.ckpt")

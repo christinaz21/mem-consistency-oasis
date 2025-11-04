@@ -1,7 +1,7 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/rnn/lstm_maze_pos_comb_onemem
+    dir: outputs/rnn/lstm_maze_pos_comb_onemem_aux_b256
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
@@ -20,7 +20,7 @@ wandb:
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wandb run id containing checkpoint or a path to a checkpoint file
 
-name: lstm_maze_pos_comb_onemem
+name: lstm_maze_pos_comb_onemem_aux_b256
 
 experiment:
   model_ckpt: null # path to a pre-trained diffusion checkpoint
@@ -30,10 +30,10 @@ experiment:
     devices: auto
     strategy: deepspeed
     batch_size: 8
-    max_epochs: 6
+    max_epochs: 3
     log_every_n_steps: 1
     checkpointing:
-      every_n_train_steps: 407
+      every_n_train_steps: 815
       enable_version_counter: True
       filename: ckpt-{epoch}-{step}
       save_top_k: 10
@@ -43,15 +43,15 @@ experiment:
     strategy: deepspeed
     batch_size: 8
     limit_batch: 2
-    val_every_n_step: 407
+    val_every_n_step: 815
     val_every_n_epoch: null
   
 algorithm:
   warmup_steps: 20
-  training_chunk_num: 64
+  training_chunk_num: 256
   lstm_mini_batch_size: 128
   training_mini_batch_size: 8
-  select_start_frame: 0
+  auxiliary_loss_coeff: 0.2
 
 dataset:
   pre_load: false

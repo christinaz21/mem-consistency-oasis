@@ -61,6 +61,7 @@ class DiffusionForcingRNNVideo(pl.LightningModule):
         self.training_chunk_num = cfg.training_chunk_num
         self.model_inner_window_size = model_cfg.inner_window_size
         self.select_start_frame = cfg.get("select_start_frame", 0)
+        self.auxiliary_loss_coeff = cfg.get("auxiliary_loss_coeff", 0.0)
 
         self.lstm_mini_batch_size = cfg.lstm_mini_batch_size
         self.training_mini_batch_size = cfg.training_mini_batch_size
@@ -343,7 +344,14 @@ class DiffusionForcingRNNVideo(pl.LightningModule):
         # get clean frame
         with torch.no_grad():
             clean_noise_levels = torch.randint(self.clean_frame_noise_range[0], self.clean_frame_noise_range[1], (num_frames, batch_size), device=xs.device)
-            clean_noised_x = self.q_sample(x_start=xs, t=clean_noise_levels, noise=torch.clamp(torch.randn_like(xs), -self.clip_noise, self.clip_noise))
+            clean_noise = torch.clamp(torch.randn_like(xs), -self.clip_noise, self.clip_noise)
+            clean_noised_x = self.q_sample(x_start=xs, t=clean_noise_levels, noise=clean_noise)
+            if self.auxiliary_loss_coeff > 0.0:
+                if self.predict_v:
+                    auxiliary_target = self.predict_v_from_x(xs, clean_noise_levels, clean_noise)[:num_frames - self.model_inner_window_size]
+                else:
+                    auxiliary_target = xs[:num_frames - self.model_inner_window_size]
+                auxiliary_loss_weights = self.compute_loss_weights(clean_noise_levels[:num_frames - self.model_inner_window_size])
             clean_noise_levels = torch.full_like(clean_noise_levels, self.stabilization_level - 1, device=xs.device)
 
         if self.global_rank == 0 and DEBUG:
@@ -361,7 +369,10 @@ class DiffusionForcingRNNVideo(pl.LightningModule):
             hidden_states=None,
             mini_batch_size=self.lstm_mini_batch_size,
             target_hidden_states=all_selected_indices,
+            get_return=(self.auxiliary_loss_coeff > 0.0),
         ) # (t - window_size + 1, )
+        if self.auxiliary_loss_coeff > 0.0:
+            auxiliary_outputs, all_hidden_states = all_hidden_states
 
         if self.global_rank == 0 and DEBUG:
             print(f"Got hidden states in {time.time() - start_time:.2f} seconds")
@@ -422,8 +433,20 @@ class DiffusionForcingRNNVideo(pl.LightningModule):
                 loss = loss * loss_weight
                 loss = self.reweight_loss(loss, batched_masks)
                 all_loss.append(loss)
-
         loss = torch.stack(all_loss).mean()
+        if self.auxiliary_loss_coeff > 0.0:
+            auxiliary_outputs = rearrange(auxiliary_outputs, "b t ... -> t b ...")
+            auxiliary_target = auxiliary_target[:auxiliary_outputs.shape[0]]
+            auxiliary_loss_weights = auxiliary_loss_weights[:auxiliary_outputs.shape[0]]
+            auxiliary_loss = F.mse_loss(
+                auxiliary_outputs,
+                auxiliary_target.detach(),
+                reduction="none",
+            )
+            auxiliary_loss_weights = auxiliary_loss_weights.view(*auxiliary_loss_weights.shape, *((1,) * (auxiliary_loss.ndim - 2)))
+            auxiliary_loss = auxiliary_loss * auxiliary_loss_weights
+            auxiliary_loss = self.reweight_loss(auxiliary_loss, masks[:auxiliary_outputs.shape[0]])
+            loss = loss + self.auxiliary_loss_coeff * auxiliary_loss
 
         if self.global_rank == 0 and DEBUG:
             print(f"Got loss in {time.time() - start_time:.2f} seconds")
