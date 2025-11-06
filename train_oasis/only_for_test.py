@@ -4,17 +4,11 @@ def get_metrics():
     paths = [
         "outputs/rnn/eval_outputs/metrics/df_ws20.json",
         "outputs/rnn/eval_outputs/metrics/rnn_chunk_combine_LSTM.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch3.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch2.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_b256_epoch1.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch3.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch1.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch2.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch3.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch4.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch5.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_epoch6.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_aux_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_TTT_comb_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_Mamba_comb.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_LSTM.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_TTT.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_fix_epoch3.json",
     ]
 
     for path in paths:
@@ -33,5 +27,15 @@ def get_metrics():
             print(f"{key}: {value:.4f}")
         print()
 
+def test():
+    import torch
+    from einops import rearrange
+    a = torch.tensor([[1, 2, 3], [4, 5, 6]])
+    a_repeat = a.repeat(2, 1)
+    a = a.unsqueeze(1).expand(-1, 2, -1)
+    a = rearrange(a, "B T D -> (T B) D")
+    print(torch.equal(a, a_repeat))
+
 if __name__ == "__main__":
     get_metrics()
+    # test()

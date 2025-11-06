@@ -72,11 +72,11 @@ class RNNBlock(nn.Module):
             if use_one_mem:
                 assert hidden_state is not None, "hidden_state should not be None when one_mem is True"
                 h_0, c_0 = hidden_state  # each of shape (num_layers, BHW_total, hidden_size)
-                h_0 = h_0.repeat(1, T, 1)  # (num_layers, BHW_total * T, hidden_size)
-                c_0 = c_0.repeat(1, T, 1)  # (num_layers, BHW_total * T, hidden_size)
-                x = rearrange(x, "BHW T D -> (BHW T) 1 D")  # (BHW_total * T, 1, D)
-                out, _ = self.rnn(x, (h_0, c_0))  # out: tensor of shape (BHW * T, 1, hidden_dim)
-                out = rearrange(out, "(BHW T) 1 D -> BHW T D", BHW=B*H*W, T=T)  # (BHW, T, D)
+                h_0 = h_0.repeat(1, T, 1)  # (num_layers, T * BHW_total, hidden_size)
+                c_0 = c_0.repeat(1, T, 1)  # (num_layers, T * BHW_total, hidden_size)
+                x = rearrange(x, "BHW T D -> (T BHW) 1 D")  # (T * BHW_total, 1, D)
+                out, _ = self.rnn(x, (h_0, c_0))  # out: tensor of shape (T * BHW, 1, hidden_dim)
+                out = rearrange(out, "(T BHW) 1 D -> BHW T D", BHW=B*H*W, T=T)  # (BHW, T, D)
                 new_hidden_state = None
             else:
                 out, new_hidden_state = self.rnn(x, hidden_state)  # out: tensor of shape (BHW, T, hidden_dim)
@@ -106,9 +106,16 @@ class RNNBlock(nn.Module):
                 new_hidden_state = (conv_state, ssm_state)
         elif self.rnn_config.rnn_type == "TTT":
             if use_one_mem:
-                raise NotImplementedError("one_mem is not implemented for TTT")
+                x = rearrange(x, "BHW T D -> (T BHW) 1 D")  # (T * BHW_total, 1, D)
+                repeated_hidden_state = {
+                    k: v.repeat(T, 1, 1, 1) for k, v in hidden_state.items()
+                }
+                position_ids = torch.zeros((x.shape[0], x.shape[1]), device=x.device, dtype=torch.long)
+                out, _ = self.rnn(x, position_ids, repeated_hidden_state)
+                new_hidden_state = None
             else:
-                position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)
+                # position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)
+                position_ids = torch.zeros((x.shape[0], x.shape[1]), device=x.device, dtype=torch.long)
                 out, new_hidden_state = self.rnn(x, position_ids, hidden_state)
         else:
             raise ValueError(f"Unknown rnn type: {self.rnn_config.rnn_type}")
@@ -151,7 +158,8 @@ class RNNBlock(nn.Module):
         elif self.rnn_config.rnn_type == "TTT":
             all_hidden_states = []
             last_target_idx = 0
-            position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)
+            # position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)
+            position_ids = torch.zeros((x.shape[0], x.shape[1]), device=x.device, dtype=torch.long)
             for target_idx in target_hidden_states:
                 # if dist.get_rank() == 0:
                 #     print(f"Processing target index: {target_idx}, last target index: {last_target_idx}")

@@ -88,5 +88,40 @@ def draw_one():
         plt.savefig(save_path, bbox_inches="tight", dpi=300)
         plt.close()
 
+def draw_curve_chunk():
+    metric_path = "outputs/rnn/eval_outputs/metrics/rnn_chunk_Mamba_comb.json"
+    fig_save_dir = "outputs/rnn/figs/curves/rnn_chunk_mamba_comb"
+    with open(metric_path, "r") as f:
+        data = json.load(f)
+    metrics = {}
+    max_frames = max(len(item["metrics"]["mse"]) for item in data)
+    print(f"Max frames: {max_frames}")
+    for item in data:
+        prompt_frames = item["prompt_frames"]
+        for key, values in item["metrics"].items():
+            if key not in metrics:
+                metrics[key] = []
+            values = np.array(values)
+            values = np.pad(values, (0, max_frames - len(values)), 'constant', constant_values=np.nan)
+            metrics[key].append(values)
+
+    os.makedirs(fig_save_dir, exist_ok=True)
+    for key in metrics:
+        metric = np.array(metrics[key])
+        mean_metric = np.nanmean(metric, axis=0)
+        plt.figure(figsize=(5, 4))
+        sns.set_theme(style="whitegrid")
+        sns.lineplot(x=np.arange(len(mean_metric)), y=mean_metric, linewidth=3.5)
+        plt.xlabel("Frame", fontsize=24)
+        plt.ylabel(key.upper(), fontsize=24)
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(fig_save_dir, f"{key}.png"), bbox_inches="tight", dpi=300)
+        plt.close()
+
+
 if __name__ == "__main__":
-    draw_one()
+    draw_curve_chunk()

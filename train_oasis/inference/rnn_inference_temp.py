@@ -331,8 +331,12 @@ def rnn_inference(args):
     ddim_noise_steps = 50
     window_size = 20
     combine_actions = args.combine_actions
+    batch_size = args.batch_size
     if args.dataset == 'maze15':
-        metadata_file_path = "data/maze/metadata_self.json"
+        if batch_size == 1:
+            metadata_file_path = "data/maze/metadata_self.json"
+        else:
+            metadata_file_path = "data/maze/metadata_self_batch_processed.json"
     elif args.dataset == 'maze9':
         metadata_file_path = "data/maze_9/metadata_self.json"
     else:
@@ -1227,29 +1231,6 @@ def rnn_check_in_context(model_name, ckpt_path):
     with open(metrics_save_path, 'w') as f:
         json.dump(all_metrics, f, indent=4)
 
-def get_metrics():
-    paths = [
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch1.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch2.json",
-        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_9_pad_epoch3.json",
-    ]
-
-    for path in paths:
-        with open(path, 'r') as f:
-            all_metrics = json.load(f)
-        metrics = {}
-        for item in all_metrics:
-            prompt_frames = item["prompt_frames"]
-            for key, values in item["metrics"].items():
-                if key not in metrics:
-                    metrics[key] = []
-                metrics[key].extend(values[prompt_frames:])
-        avg_metrics = {key: sum(values) / len(values) for key, values in metrics.items()}
-        print(f"Metrics for {path}:")
-        for key, value in avg_metrics.items():
-            print(f"{key}: {value:.4f}")
-        print()
-
 if __name__ == "__main__":
     # get_metrics()
     parser = argparse.ArgumentParser()
@@ -1258,6 +1239,7 @@ if __name__ == "__main__":
     parser.add_argument('--combine_actions', action='store_true', help='Whether to combine actions')
     parser.add_argument('--dataset', type=str, default='maze15', help='Dataset name')
     parser.add_argument('--onemem', action='store_true', help='Use one memory for RNN')
+    parser.add_argument('--batch_size', type=int, default=1, help='Inference batch size')
     args = parser.parse_args()
     rnn_inference(args)
     # vanilla("ws20", "outputs/rnn/df_maze/checkpoints/epoch=0-step=36000.ckpt")

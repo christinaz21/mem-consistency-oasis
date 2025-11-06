@@ -308,6 +308,7 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
                 xBC = xBC + self.conv1d.bias
             xBC = self.act(xBC).to(dtype=dtype)
         else:
+            xBC = xBC.to(dtype=dtype)
             xBC = causal_conv1d_update(
                 xBC,
                 conv_state,

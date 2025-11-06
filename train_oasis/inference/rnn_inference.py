@@ -94,7 +94,7 @@ def rnn_chunk_inference(model_name, ckpt_path):
     ddim_noise_steps = 50
     window_size = 20
     metadata_file_path = "data/maze/metadata_self.json"
-    combine_actions = True
+    combine_actions = "comb" in model_name
     save_dir = os.path.join("outputs/rnn/eval_outputs", f"rnn_chunk_{model_name}")
     metrics_save_path = os.path.join("outputs/rnn/eval_outputs/metrics", f"rnn_chunk_{model_name}.json")
     dtype = torch.bfloat16
@@ -156,7 +156,7 @@ def rnn_chunk_inference(model_name, ckpt_path):
     else:
         state_dict = torch.load(ckpt_path, map_location="cpu")
         model.load_state_dict(state_dict, strict=True)
-    model = model.to(device).eval()
+    model = model.to(device).to(dtype).eval()
     print(f"Model {model_name} loaded from {ckpt_path} and moved to {device}.")
 
     vae = AutoencoderKL.from_pretrained(vae_ckpt)
@@ -242,7 +242,7 @@ def rnn_chunk_inference(model_name, ckpt_path):
                     x_chunk = x[:, start_frame:end_frame]
                     t_chunk = torch.full((B, end_frame - start_frame), stabilization_level - 1, dtype=torch.long, device=device)
                     actions_chunk = actions[:, start_frame:end_frame]
-                    _, hidden_states = model.inference(x_chunk, t_chunk, actions_chunk, hidden_states=hidden_states)
+                    _, hidden_states = model.inference(x_chunk, t_chunk, actions_chunk, hidden_states=hidden_states, start_ids=start_frame)
 
         # sampling loop
         for i in tqdm(range(n_prompt_frames, total_frames), desc="sampling frames"):
@@ -272,9 +272,9 @@ def rnn_chunk_inference(model_name, ckpt_path):
                     with autocast("cuda", dtype=dtype):
                         # v = model(x_curr, t, actions[:, start_frame : i + 1])
                         if noise_idx == 1 and (i + 1) % model.max_frames == 0:
-                            v, hidden_states = model.inference(x_curr, t, actions[:, start_frame : end_frame], hidden_states=hidden_states)
+                            v, hidden_states = model.inference(x_curr, t, actions[:, start_frame : end_frame], hidden_states=hidden_states, start_ids=start_frame)
                         else:
-                            v, _ = model.inference(x_curr, t, actions[:, start_frame : end_frame], hidden_states=hidden_states)
+                            v, _ = model.inference(x_curr, t, actions[:, start_frame : end_frame], hidden_states=hidden_states, start_ids=start_frame)
                 if predict_v:
                     x_start = alphas_cumprod[t].sqrt() * x_curr - (1 - alphas_cumprod[t]).sqrt() * v
                 else:
@@ -1017,8 +1017,8 @@ def get_metrics():
         print()
 
 if __name__ == "__main__":
-    get_metrics()
+    # get_metrics()
     # rnn_inference("LSTM_comb_onemem_b256_epoch3", "outputs/rnn/lstm_maze_pos_comb_onemem_b256/checkpoints/ckpt-epoch=2-step=1221.ckpt")
     # vanilla("ws200", "outputs/df/maze_200/checkpoints/epoch=0-step=54000.ckpt")
     # rnn_check_in_context("LSTM_comb_sft_unfreeze_epoch6", "outputs/rnn/lstm_maze_pos_comb_sft_unfreeze/checkpoints/ckpt-epoch=5-step=4890.ckpt")
-    # rnn_chunk_inference("TTT_comb_epoch1", "outputs/rnn/rnn_chunk_ttt_maze_pos_comb/checkpoints/ckpt-epoch=0-step=407.ckpt")
+    rnn_chunk_inference("Mamba", "outputs/rnn/rnn_chunk_mamba_maze_pos/checkpoints/epoch=2-step=2445.ckpt")

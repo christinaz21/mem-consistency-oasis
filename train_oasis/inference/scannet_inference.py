@@ -196,7 +196,7 @@ def vanilla(args):
         actions = np.load(action_path, allow_pickle=True)
         actions = actions[: total_length]
         actions = torch.from_numpy(actions).float().unsqueeze(0)  # (1, T, D)
-        assert actions.shape[0] == total_length, f"actions.shape[0]={actions.shape[0]} != {total_length}"
+        assert actions.shape[1] == total_length, f"actions.shape[1]={actions.shape[1]} != {total_length}"
 
         prompts.append(x)
         all_actions.append(actions)

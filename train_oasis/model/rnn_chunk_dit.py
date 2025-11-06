@@ -79,7 +79,7 @@ class RNNBlock(nn.Module):
         out = rearrange(out, "(B H W) T D -> B T H W D", B=B, H=H, W=W)  # (B, T, H, W, D)
         return out
 
-    def inference(self, x, hidden_state):
+    def inference(self, x, hidden_state, start_ids):
         B, T, H, W, D = x.shape
         x = rearrange(x, "B T H W D -> (B H W) T D")  # (BHW, T, D)
         if self.rnn_config.rnn_type == "LSTM":
@@ -98,7 +98,9 @@ class RNNBlock(nn.Module):
             out = outputs
             new_hidden_state = (conv_state, ssm_state)
         elif self.rnn_config.rnn_type == "TTT":
-            position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)
+            position_ids = torch.arange(x.shape[1], device=x.device)
+            position_ids += start_ids
+            position_ids = position_ids.unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)
             out, new_hidden_state = self.rnn(x, position_ids, hidden_state)
         else:
             raise ValueError(f"Unknown rnn type: {self.rnn_config.rnn_type}")
@@ -200,7 +202,7 @@ class SpatioTemporalRNNDiTBlock(nn.Module):
 
         return x
 
-    def inference(self, x, c, hidden_state):
+    def inference(self, x, c, hidden_state, start_ids):
         B, T, H, W, D = x.shape
 
         # spatial block
@@ -221,7 +223,7 @@ class SpatioTemporalRNNDiTBlock(nn.Module):
             action_feat = self.combine_action_proj(c)  # (B, T, combine_action_dim)
             action_feat = action_feat.unsqueeze(2).unsqueeze(2).expand(-1, -1, H, W, -1)  # (B, T, H, W, combine_action_dim)
             x = torch.cat([x, action_feat], dim=-1)  # (B, T, H, W, D + combine_action_dim)
-        x, new_hidden_state = self.rnn.inference(x, hidden_state)
+        x, new_hidden_state = self.rnn.inference(x, hidden_state, start_ids)
         x = residual + gate(x, r_gate)
 
         return x, new_hidden_state
@@ -368,7 +370,7 @@ class DiT(nn.Module):
 
         return x
 
-    def inference(self, x, t, external_cond=None, hidden_states=None):
+    def inference(self, x, t, external_cond=None, hidden_states=None, start_ids=None):
         B, T, C, H, W = x.shape
 
         # add spatial embeddings
@@ -387,9 +389,9 @@ class DiT(nn.Module):
             hidden_states = [None] * len(self.blocks)
         for block, hidden_state in zip(self.blocks, hidden_states):
             if self.gradient_checkpointing and self.training:
-                x, hidden_state = checkpoint(block.inference, x, c, hidden_state, use_reentrant=False)
+                x, hidden_state = checkpoint(block.inference, x, c, hidden_state, start_ids, use_reentrant=False)
             else:
-                x, hidden_state = block.inference(x, c, hidden_state)  # (N, T, H, W, D)
+                x, hidden_state = block.inference(x, c, hidden_state, start_ids)  # (N, T, H, W, D)
             new_hidden_states.append(hidden_state)
         if self.gradient_checkpointing and self.training:
             x = checkpoint(self.final_layer, x, c, use_reentrant=False)
