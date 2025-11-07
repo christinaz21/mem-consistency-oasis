@@ -1,0 +1,77 @@
+# configuration parsing starts here
+hydra:
+  run:
+    dir: outputs/rnn/test
+
+defaults:
+  - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
+  - dataset: latent_pos # dataset yaml file name in configurations/dataset folder [fixme]
+  - algorithm: df_video # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - model: dit # model yaml file name in configurations/model folder [fixme]
+  - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
+
+debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
+
+wandb:
+  entity: tychen0028 # wandb account name / organization name [fixme]
+  project: diffusion-forcing # wandb project name; if not provided, defaults to root folder name [fixme]
+  mode: offline # set wandb logging to online, offline or dryrun
+
+resume: null # wandb run id to resume logging and loading checkpoint from
+load: null # wandb run id containing checkpoint or a path to a checkpoint file
+
+name: mc_rnn_chunk_ttt
+
+experiment:
+  model_ckpt: outputs/2025-05-25/07-51-43/checkpoints/epoch=0-step=41000.ckpt # path to a pre-trained diffusion checkpoint
+  tasks: [training]
+  training:
+    precision: bf16-mixed
+    devices: auto
+    strategy: deepspeed
+    batch_size: 4
+    max_epochs: -1
+    max_steps: 20000
+    checkpointing:
+      every_n_train_steps: 1000 # Save a checkpoint every 1000 training steps
+      enable_version_counter: True
+      filename: ckpt-{epoch}-{step}
+      save_top_k: 10 # Save the latest 10 checkpoints
+      monitor: step
+  validation:
+    precision: bf16-mixed
+    strategy: deepspeed
+    batch_size: 4
+    limit_batch: 1
+    val_every_n_step: null
+    val_every_n_epoch: 5000
+  
+algorithm:
+  warmup_steps: 100
+  external_cond_dim: 4
+  vae_name: null
+  vae_ckpt: null
+
+dataset:
+  pre_load: false
+  n_frames: 100
+  context_length: 0
+  frame_skip: 1
+  data_mean: 0.0
+  data_std: 1.0
+  metadata:
+    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/20k.json
+    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata_mem.json
+  limit_video_length:
+    - null
+    - null
+  
+model:
+  sft_rnn: True
+  architecture: rnn_chunk
+  inner_window_size: 20
+  precision: bf16-mixed
+  rnn_config:
+    rnn_type: TTT
+    num_attention_heads: 16
+    mini_batch_size: 1

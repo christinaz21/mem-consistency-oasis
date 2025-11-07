@@ -106,12 +106,22 @@ class RNNBlock(nn.Module):
                 new_hidden_state = (conv_state, ssm_state)
         elif self.rnn_config.rnn_type == "TTT":
             if use_one_mem:
-                x = rearrange(x, "BHW T D -> (T BHW) 1 D")  # (T * BHW_total, 1, D)
-                repeated_hidden_state = {
-                    k: v.repeat(T, 1, 1, 1) for k, v in hidden_state.items()
-                }
-                position_ids = torch.zeros((x.shape[0], x.shape[1]), device=x.device, dtype=torch.long)
-                out, _ = self.rnn(x, position_ids, repeated_hidden_state)
+                # x = rearrange(x, "BHW T D -> (T BHW) 1 D")  # (T * BHW_total, 1, D)
+                # repeated_hidden_state = {
+                #     k: v.repeat(T, 1, 1, 1) for k, v in hidden_state.items()
+                # }
+                # position_ids = torch.zeros((x.shape[0], x.shape[1]), device=x.device, dtype=torch.long)
+                # out, _ = self.rnn(x, position_ids, repeated_hidden_state)
+                # out = rearrange(out, "(T BHW) 1 D -> BHW T D", BHW=B*H*W, T=T)  # (BHW, T, D)
+                # new_hidden_state = None
+                for step in range(x.shape[1]):
+                    position_ids = torch.zeros((x.shape[0], 1), device=x.device, dtype=torch.long)
+                    out, hidden_state = self.rnn(x[:, step:step+1, :], position_ids, hidden_state)
+                    if step == 0:
+                        outputs = out
+                    else:
+                        outputs = torch.cat([outputs, out], dim=1)
+                out = outputs
                 new_hidden_state = None
             else:
                 # position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)  # (BHW, T)

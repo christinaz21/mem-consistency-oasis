@@ -8,7 +8,34 @@ def get_metrics():
         "outputs/rnn/eval_outputs/metrics/rnn_chunk_Mamba_comb.json",
         "outputs/rnn/eval_outputs/metrics/rnn_chunk_LSTM.json",
         "outputs/rnn/eval_outputs/metrics/rnn_chunk_TTT.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_chunk_Mamba.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_fix_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_fix_epoch2.json",
         "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_fix_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_fix_epoch4.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_onemem_fix_epoch5.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch4.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_pad_epoch5.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_epoch4.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_epoch5.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_epoch4.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_epoch5.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_epoch6.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_unfreeze_epoch1.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_unfreeze_epoch2.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_unfreeze_epoch3.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_unfreeze_epoch4.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_unfreeze_epoch5.json",
+        "outputs/rnn/eval_outputs/metrics/rnn_LSTM_comb_sft_unfreeze_epoch6.json",
     ]
 
     for path in paths:
@@ -28,14 +55,13 @@ def get_metrics():
         print()
 
 def test():
-    import torch
-    from einops import rearrange
-    a = torch.tensor([[1, 2, 3], [4, 5, 6]])
-    a_repeat = a.repeat(2, 1)
-    a = a.unsqueeze(1).expand(-1, 2, -1)
-    a = rearrange(a, "B T D -> (T B) D")
-    print(torch.equal(a, a_repeat))
+    import json
+    with open("data/mc_mem_data/metadata.json", 'r') as f:
+        metadata = json.load(f)
+
+    with open("data/mc_mem_data/temp.json", 'w') as f:
+        json.dump(metadata["training"], f, indent=4)
 
 if __name__ == "__main__":
-    get_metrics()
-    # test()
+    # get_metrics()
+    test()

@@ -213,7 +213,7 @@ class DiffusionForcingVideo(pl.LightningModule):
                 state_dict = torch.load(model_ckpt, map_location="cpu")
                 self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
             if self.model_cfg.architecture == "rnn_chunk" and sft_rnn:
-                trainable_param_names = ["rnn", "r_norm", "r_adaLN_modulation", "combine_action_proj", "external_cond", "final_layer"]
+                trainable_param_names = ["rnn", "r_norm", "r_adaLN_modulation", "combine_action_proj"]
                 for name, param in self.diffusion_model.named_parameters():
                     if any([tp_name in name for tp_name in trainable_param_names]):
                         param.requires_grad = True

@@ -15,7 +15,7 @@ module load anaconda3/2024.6
 conda activate oasis
 module load cudatoolkit/11.8
 
-torchrun --nnodes=1 --nproc_per_node=4 /home/tc0786/Project/train-oasis/train_oasis/main.py --config-name=rnn_chunk_mamba_maze
+torchrun --nnodes=1 --nproc_per_node=4 /home/tc0786/Project/train-oasis/train_oasis/main.py --config-name=mc_rnn_ttt
 # python train_oasis/inference/lstm_chunk.py
 # python /home/tc0786/Project/train-oasis/train_oasis/inference/batch_inference.py
 # python /home/tc0786/Project/train-oasis/train_oasis/inference/evaluate.py
