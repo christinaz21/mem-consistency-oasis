@@ -209,6 +209,13 @@ class DiffusionForcingVideo(pl.LightningModule):
                     if key.startswith("diffusion_model."):
                         state_dict[key[16:]] = value
                 self.diffusion_model.load_state_dict(state_dict, strict=strict_load)
+            elif model_ckpt.endswith(".bin"):
+                state_dict = torch.load(model_ckpt, map_location="cpu")
+                new_state_dict = {}
+                for key, value in state_dict.items():
+                    if key.startswith("diffusion_model."):
+                        new_state_dict[key[16:]] = value
+                self.diffusion_model.load_state_dict(new_state_dict, strict=strict_load)
             else:
                 state_dict = torch.load(model_ckpt, map_location="cpu")
                 self.diffusion_model.load_state_dict(state_dict, strict=strict_load)

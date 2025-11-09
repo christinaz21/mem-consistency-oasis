@@ -69,12 +69,15 @@ class RNNBlock(nn.Module):
         x = rearrange(x, "B T H W D -> (B H W) T D")  # (BHW, T, D)
         use_one_mem = self.one_mem and (T > 1)
         if self.rnn_config.rnn_type == "LSTM":
+            mask_last_hidden_state = getattr(self.rnn_config, "mask_last_hidden_state", False)
             if use_one_mem:
                 assert hidden_state is not None, "hidden_state should not be None when one_mem is True"
                 h_0, c_0 = hidden_state  # each of shape (num_layers, BHW_total, hidden_size)
                 h_0 = h_0.repeat(1, T, 1)  # (num_layers, T * BHW_total, hidden_size)
                 c_0 = c_0.repeat(1, T, 1)  # (num_layers, T * BHW_total, hidden_size)
                 x = rearrange(x, "BHW T D -> (T BHW) 1 D")  # (T * BHW_total, 1, D)
+                if mask_last_hidden_state:
+                    h_0 = torch.zeros_like(h_0, device=h_0.device)
                 out, _ = self.rnn(x, (h_0, c_0))  # out: tensor of shape (T * BHW, 1, hidden_dim)
                 out = rearrange(out, "(T BHW) 1 D -> BHW T D", BHW=B*H*W, T=T)  # (BHW, T, D)
                 new_hidden_state = None
@@ -116,7 +119,8 @@ class RNNBlock(nn.Module):
                 # new_hidden_state = None
                 for step in range(x.shape[1]):
                     position_ids = torch.zeros((x.shape[0], 1), device=x.device, dtype=torch.long)
-                    out, hidden_state = self.rnn(x[:, step:step+1, :], position_ids, hidden_state)
+                    # TOFIX: hidden_state should be repeated for each step
+                    out, _ = self.rnn(x[:, step:step+1, :], position_ids, hidden_state)
                     if step == 0:
                         outputs = out
                     else:
