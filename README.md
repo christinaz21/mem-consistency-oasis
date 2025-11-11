@@ -76,7 +76,7 @@ The process is similar to running Diffusion Force. You need to configure the set
 ## RNN Inference
 
 1. download oasis vae: `Etched/oasis-500m vit-l-20.safetensors`
-2. download evaluation data: `cilae/mc_dit minecraft_data`, and set the path in `paths.json`. Note that we only use `memory` folder for evaluation.
+2. download evaluation data `cilae/mc_dit minecraft_data.zip` and unzip it, and set the path in `paths.json`. Note that we only use `memory` folder for evaluation.
 3. run inference:
     ```bash
     python train_oasis/inference/rnn_inference.py \
