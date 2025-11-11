@@ -153,6 +153,7 @@ def get_data(args):
         prompts = []
         all_actions = []
         save_paths = []
+        gt_videos = []
         for info in memory_meta_data:
             prompt_path = info["video_path"]
             video = read_video(prompt_path, pts_unit='sec')[0]  # (T, H, W, C)
