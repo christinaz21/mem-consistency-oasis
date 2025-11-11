@@ -82,6 +82,10 @@ class RNNBlock(nn.Module):
                 out = rearrange(out, "(T BHW) 1 D -> BHW T D", BHW=B*H*W, T=T)  # (BHW, T, D)
                 new_hidden_state = None
             else:
+                if mask_last_hidden_state and hidden_state is not None:
+                    h_0, c_0 = hidden_state
+                    h_0 = torch.zeros_like(h_0, device=h_0.device)
+                    hidden_state = (h_0, c_0)
                 out, new_hidden_state = self.rnn(x, hidden_state)  # out: tensor of shape (BHW, T, hidden_dim)
         elif self.rnn_config.rnn_type == "Mamba2":
             if use_one_mem:

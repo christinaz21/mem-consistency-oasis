@@ -72,3 +72,24 @@ The process is similar to running Diffusion Force. You need to configure the set
         |-- action: (n, 6)
         ...
     ```
+
+## RNN Inference
+
+1. download oasis vae: `Etched/oasis-500m vit-l-20.safetensors`
+2. download evaluation data: `cilae/mc_dit minecraft_data`, and set the path in `paths.json`. Note that we only use `memory` folder for evaluation.
+3. run inference:
+    ```bash
+    python train_oasis/inference/rnn_inference.py \
+        --save_dir /path/to/save_dir \
+        --ckpt_path /path/to/ckpt \
+        --metadata_file_path /path/to/paths.json \
+        --inference_type chunkwise or framewise \
+        --vae_name oasis \
+        --vae_ckpt /path/to/vae_ckpt \
+        --batch_size 32 \
+        --dataset minecraft \
+        --rnn_type LSTM or Mamba or TTT \
+        --total_frames 100 \
+        --prompt_frames 60
+    ```
+    You need to set `--combine_actions` when using LSTM, and set `--onemem` when using framewise inference. You will never need to set `--mask_last_hidden_state`.
