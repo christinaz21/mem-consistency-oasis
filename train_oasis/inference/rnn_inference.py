@@ -73,7 +73,7 @@ def get_validation_metrics_for_videos(
     observation_gt = torch.clamp(observation_gt, -1.0, 1.0)
 
     output_dict["lpips"] = []
-    lpips_batch_size = 64
+    lpips_batch_size = 16
     device = observation_hat.device
     global _lpips_model
     if '_lpips_model' not in globals():
@@ -327,6 +327,7 @@ def rnn_chunk_inference(args):
                         x_clip = vae.encode(x_clip * 2 - 1).mean * scaling_factor
                         all_frames.append(x_clip)
                 x = torch.cat(all_frames, dim=0)
+                x = rearrange(x, "b (h w) c -> b c h w", h=H // vae.patch_size, w=W // vae.patch_size)
         else:
             raise ValueError(f"Unknown VAE name: {args.vae_name}")
         x = rearrange(x, "(b t) ... -> b t ...", b=B, t=n_prompt_frames)
@@ -391,14 +392,26 @@ def rnn_chunk_inference(args):
 
         # vae decoding
         x = rearrange(x, "b t c h w -> (b t) c h w")
-        with torch.no_grad():
-            all_frames = []
-            for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
-                x_clip = x[idx:idx + vae_batch_size]
-                x_clip = vae.decode(x_clip / vae.config.scaling_factor).sample
-                x_clip = (x_clip + 1) / 2
-                all_frames.append(x_clip)
-            x = torch.cat(all_frames, dim=0)
+        if args.vae_name == "sd_vae":
+            with torch.no_grad():
+                all_frames = []
+                for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
+                    x_clip = x[idx:idx + vae_batch_size]
+                    x_clip = vae.decode(x_clip / vae.config.scaling_factor).sample
+                    x_clip = (x_clip + 1) / 2
+                    all_frames.append(x_clip)
+                x = torch.cat(all_frames, dim=0)
+        elif args.vae_name == "oasis":
+            x = rearrange(x, "b c h w -> b (h w) c")
+            with torch.no_grad():
+                all_frames = []
+                for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
+                    x_clip = x[idx:idx + vae_batch_size]
+                    x_clip = (vae.decode(x_clip / scaling_factor) + 1) / 2
+                    all_frames.append(x_clip)
+                x = torch.cat(all_frames, dim=0)
+        else:
+            raise ValueError(f"Unknown VAE name: {args.vae_name}")
         x = rearrange(x, "(b t) c h w -> b t h w c", b=B, t=total_frames)
 
         for idx in range(B):
@@ -557,14 +570,27 @@ def rnn_frame_inference(args):
         x = rearrange(x, "b t c h w -> (b t) c h w")
         all_frames = []
         
-        with torch.no_grad():
-            with autocast("cuda", dtype=dtype):
-                for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae encoding frames"):
-                    x_clip = x[idx:idx + vae_batch_size]
-                    x_clip = x_clip * 2 - 1
-                    x_clip = vae.encode(x_clip).latent_dist.sample() * vae.config.scaling_factor
-                    all_frames.append(x_clip)
-            x = torch.cat(all_frames, dim=0)
+        if args.vae_name == "sd_vae":
+            with torch.no_grad():
+                with autocast("cuda", dtype=dtype):
+                    for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae encoding frames"):
+                        x_clip = x[idx:idx + vae_batch_size]
+                        x_clip = x_clip * 2 - 1
+                        x_clip = vae.encode(x_clip).latent_dist.sample() * vae.config.scaling_factor
+                        all_frames.append(x_clip)
+                x = torch.cat(all_frames, dim=0)
+        elif args.vae_name == "oasis":
+            scaling_factor = 0.07843137255
+            with torch.no_grad():
+                with autocast("cuda", dtype=torch.half):
+                    for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae encoding frames"):
+                        x_clip = x[idx:idx + vae_batch_size]
+                        x_clip = vae.encode(x_clip * 2 - 1).mean * scaling_factor
+                        all_frames.append(x_clip)
+                x = torch.cat(all_frames, dim=0)
+                x = rearrange(x, "b (h w) c -> b c h w", h=H // vae.patch_size, w=W // vae.patch_size)
+        else:
+            raise ValueError(f"Unknown VAE name: {args.vae_name}")
         x = rearrange(x, "(b t) ... -> b t ...", b=B, t=n_prompt_frames)
 
         # get hidden states for prompt frames
@@ -619,14 +645,26 @@ def rnn_frame_inference(args):
 
         # vae decoding
         x = rearrange(x, "b t c h w -> (b t) c h w")
-        with torch.no_grad():
-            all_frames = []
-            for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
-                x_clip = x[idx:idx + vae_batch_size]
-                x_clip = vae.decode(x_clip / vae.config.scaling_factor).sample
-                x_clip = (x_clip + 1) / 2
-                all_frames.append(x_clip)
-            x = torch.cat(all_frames, dim=0)
+        if args.vae_name == "sd_vae":
+            with torch.no_grad():
+                all_frames = []
+                for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
+                    x_clip = x[idx:idx + vae_batch_size]
+                    x_clip = vae.decode(x_clip / vae.config.scaling_factor).sample
+                    x_clip = (x_clip + 1) / 2
+                    all_frames.append(x_clip)
+                x = torch.cat(all_frames, dim=0)
+        elif args.vae_name == "oasis":
+            x = rearrange(x, "b c h w -> b (h w) c")
+            with torch.no_grad():
+                all_frames = []
+                for idx in tqdm(range(0, x.shape[0], vae_batch_size), desc="vae decoding frames"):
+                    x_clip = x[idx:idx + vae_batch_size]
+                    x_clip = (vae.decode(x_clip / scaling_factor) + 1) / 2
+                    all_frames.append(x_clip)
+                x = torch.cat(all_frames, dim=0)
+        else:
+            raise ValueError(f"Unknown VAE name: {args.vae_name}")
         x = rearrange(x, "(b t) c h w -> b t h w c", b=B, t=total_frames)
 
         for idx in range(B):
