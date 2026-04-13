@@ -20,8 +20,9 @@ from omegaconf.omegaconf import open_dict
 
 from train_oasis.utils import cyan, is_rank_zero, download_latest_checkpoint, is_run_id
 from train_oasis.experiment.experiment import VideoPredictionExperiment
-from typing import Optional, Union
+from typing import Optional, Union, List, Any
 from lightning.pytorch.loggers.wandb import WandbLogger
+from lightning.pytorch.loggers import CSVLogger
 
 exp_registry = dict(
     exp=VideoPredictionExperiment,
@@ -32,7 +33,7 @@ exp_registry = dict(
 
 def build_experiment(
     cfg: DictConfig,
-    logger: Optional[WandbLogger] = None,
+    logger: Optional[Union[WandbLogger, List[Any], CSVLogger]] = None,
     ckpt_path: Optional[Union[str, Path]] = None,
 ) -> VideoPredictionExperiment:
     """
@@ -92,7 +93,7 @@ def run_local(cfg: DictConfig):
             logger_cls = SpaceEfficientWandbLogger
 
         offline = cfg.wandb.mode != "online"
-        logger = logger_cls(
+        wandb_logger = logger_cls(
             name=name,
             save_dir=str(output_dir),
             offline=offline,
@@ -102,6 +103,15 @@ def run_local(cfg: DictConfig):
             config=OmegaConf.to_container(cfg),
             id=resume,
         )
+        # Plain-text per-step scalars (incl. GRPO timing) — grep-friendly; W&B offline
+        # stores history in binary run-*.wandb until sync/finish.
+        csv_logger = CSVLogger(save_dir=str(output_dir), name="lightning_csv")
+        logger = [wandb_logger, csv_logger]
+        if is_rank_zero:
+            print(
+                cyan("CSV metrics:"),
+                f"{output_dir}/lightning_csv/version_*/metrics.csv",
+            )
     else:
         logger = None
 
@@ -133,7 +143,7 @@ def run_local(cfg: DictConfig):
 
 @hydra.main(
     version_base=None,
-    config_path="/home/tc0786/Project/train-oasis/config",
+    config_path="/n/fs/videogen/train-oasis/config",
     config_name="pos",
 )
 def run(cfg: DictConfig):

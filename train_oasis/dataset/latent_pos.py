@@ -18,8 +18,9 @@ class LatentPosDataset(torch.utils.data.Dataset):
     def __init__(self, cfg: DictConfig, split: str = "training"):
         super().__init__()
         self.split = split
-        if split == "validation":
-            return
+        # Validation/test use the same latent index as training so Lightning gets a
+        # non-empty val_dataloader (GRPO logs val videos from the val batch).
+        # ``limit_batch`` in the experiment caps how many val batches actually run.
         self.n_frames = cfg.n_frames
         self.pre_load = cfg.pre_load
         self.action_type = cfg.action_type
@@ -65,10 +66,9 @@ class LatentPosDataset(torch.utils.data.Dataset):
         self.cum_clips_per_video = np.cumsum(self.clips_per_video)
 
     def __len__(self):
-        if self.split == "training":
-            return self.clips_per_video.sum()
-        else:
-            return 0
+        if self.split in ("training", "validation", "test"):
+            return int(self.clips_per_video.sum())
+        return 0
 
     def split_idx(self, idx):
         video_idx = np.argmax(self.cum_clips_per_video > idx)

@@ -21,6 +21,24 @@ from .blocks import (
 )
 from torch.utils.checkpoint import checkpoint
 
+
+def _dit_ckpt_block_forward(block, x, c):
+    # Non-reentrant checkpoint + bf16 AMP: run with autocast off so forward/recompute
+    # match; activations must match Linear weights (fp32 under AMP), so cast inputs
+    # away from bf16 produced by the embedding path above.
+    with torch.autocast(device_type=x.device.type, enabled=False):
+        x = x.float()
+        c = c.float()
+        return block(x, c)
+
+
+def _dit_ckpt_final_forward(final_layer, x, c):
+    with torch.autocast(device_type=x.device.type, enabled=False):
+        x = x.float()
+        c = c.float()
+        return final_layer(x, c)
+
+
 class SpatioTemporalDiTBlock(nn.Module):
     def __init__(
         self,
@@ -208,11 +226,21 @@ class DiT(nn.Module):
             c += self.external_cond(external_cond)
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
-                x = checkpoint(block, x, c, use_reentrant=False)
+                # Non-reentrant checkpoint + DDP: use_reentrant=False avoids "marked
+                # ready twice". Autocast disabled inside checkpoint (see helpers above).
+                x = checkpoint(
+                    _dit_ckpt_block_forward, block, x, c, use_reentrant=False
+                )
             else:
                 x = block(x, c)  # (N, T, H, W, D)
         if self.gradient_checkpointing and self.training:
-            x = checkpoint(self.final_layer, x, c, use_reentrant=False)
+            x = checkpoint(
+                _dit_ckpt_final_forward,
+                self.final_layer,
+                x,
+                c,
+                use_reentrant=False,
+            )
         else:
             x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
         # unpatchify
@@ -296,11 +324,31 @@ def dit_easy():
         max_frames=10
     )
 
+def dit_easy_6():
+    """Same as dit_easy but 6-D actions (e.g. Cosmos / vehicle control)."""
+    return DiT(
+        input_h=18,
+        input_w=32,
+        in_channels=16,
+        patch_size=2,
+        hidden_size=1024,
+        depth=16,
+        num_heads=16,
+        external_cond_dim=6,
+        max_frames=10
+    )
+
+def cosmos():
+    """Alias for dit_easy_6 (matches train-oasis-2 naming for Cosmos-style 6-D actions)."""
+    return dit_easy_6()
+
 DiT_models = {
     "DiT-S/2": DiT_S_2,
     "dit_small": dit_small,
     "dit_cty": dit_cty,
     "flappy_bird_dit": flappy_bird_dit,
     "flappy_bird_dit_half": flappy_bird_dit_half,
-    "dit_easy": dit_easy
+    "dit_easy": dit_easy,
+    "dit_easy_6": dit_easy_6,
+    "cosmos": cosmos,
 }

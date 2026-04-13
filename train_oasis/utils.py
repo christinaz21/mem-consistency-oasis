@@ -123,7 +123,7 @@ def load_prompt(path, video_offset=None, n_prompt_frames=1):
     return prompt
 
 
-def load_actions(path, action_offset=None):
+def load_actions(path, action_offset=None, second=False):
     if path.endswith(".actions.pt"):
         actions = one_hot_actions(torch.load(path))
     elif path.endswith(".one_hot_actions.pt"):
@@ -138,8 +138,20 @@ def load_actions(path, action_offset=None):
         actions = np.load(path)["actions"]
         actions = actions[1 : ]
         actions = torch.from_numpy(actions).float()
+    elif path.endswith(".npy"):
+        # Cosmos-style [T, D] float array; align with train-oasis-2 (drop t=0 unless second=True).
+        actions = np.load(path)
+        actions = np.asarray(actions, dtype=np.float32)
+        if actions.ndim != 2:
+            raise ValueError(f".npy actions expected shape [T, D], got {actions.shape}")
+        if not second:
+            actions = actions[1:]
+        actions = torch.from_numpy(actions)
     else:
-        raise ValueError("unrecognized action file extension; expected '.jsonl', '*.actions.pt' or '*.one_hot_actions.pt'")
+        raise ValueError(
+            "unrecognized action file extension; expected '.jsonl', '.npy', '.npz', "
+            "'*.actions.pt' or '*.one_hot_actions.pt'"
+        )
     if action_offset is not None:
         actions = actions[action_offset:]
     actions = torch.cat([torch.zeros_like(actions[:1]), actions], dim=0)

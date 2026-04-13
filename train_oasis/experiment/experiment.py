@@ -17,9 +17,14 @@ from train_oasis.trainer.DF_Rag_Trainer import DiffusionForcingRagVideo
 from train_oasis.trainer.Latent_Rag_Trainer import LatentRagVideo
 from train_oasis.trainer.Latent_DF_Trainer import LatentDFVideo
 from train_oasis.trainer.Latent_FramePack_Trainer import LatentFramePackVideo
+from train_oasis.trainer.DF_GRPO_Trainer import DiffusionForcingGRPO
+from train_oasis.trainer.DF_GRPO_Clipped_Trainer import DiffusionForcingGRPOClipped
+from train_oasis.trainer.DF_GRPO_ClippedSpatialDistance_Trainer import (
+    DiffusionForcingGRPOClippedSpatialDistance,
+)
 
 
-from typing import Optional, Union
+from typing import Optional, Union, Any, Iterable
 import pathlib
 import os
 
@@ -37,6 +42,42 @@ from omegaconf import DictConfig
 
 from train_oasis.utils import cyan, is_rank_zero
 
+
+def _resolve_trainer_devices(devices_cfg) -> Union[int, list]:
+    """
+    Map Hydra `experiment.training.devices` to a value PyTorch Lightning accepts.
+
+    Lightning sometimes does not spawn DDP workers when `devices=-1` / `auto` is
+    passed through OmegaConf; resolving to an explicit integer matching
+    `torch.cuda.device_count()` fixes "MEMBER: 1/1" with multiple GPUs allocated.
+    """
+    n_cuda = torch.cuda.device_count()
+    if devices_cfg is None:
+        return max(n_cuda, 1)
+    if isinstance(devices_cfg, (list, tuple)):
+        return list(devices_cfg)
+    if isinstance(devices_cfg, str):
+        s = devices_cfg.strip().lower()
+        if s in ("auto", "all", "-1"):
+            return max(n_cuda, 1)
+        if s.isdigit():
+            k = int(s)
+            return min(k, max(n_cuda, 1)) if n_cuda else k
+        return devices_cfg
+    if isinstance(devices_cfg, int):
+        if devices_cfg == -1:
+            return max(n_cuda, 1)
+        if devices_cfg > 0:
+            return min(devices_cfg, max(n_cuda, 1)) if n_cuda else devices_cfg
+    return devices_cfg
+
+
+def _trainer_device_ranks(devices_resolved) -> int:
+    if isinstance(devices_resolved, int):
+        return devices_resolved
+    return len(devices_resolved)
+
+
 class VideoPredictionExperiment:
     """
     A video prediction experiment
@@ -53,6 +94,11 @@ class VideoPredictionExperiment:
         latent_rag=LatentRagVideo,
         latent_df=LatentDFVideo,
         latent_frame_pack=LatentFramePackVideo,
+        df_grpo=DiffusionForcingGRPO,
+        df_grpo_clipped=DiffusionForcingGRPOClipped,
+        df_grpo_clipped_sd=DiffusionForcingGRPOClippedSpatialDistance,
+        # Back-compat alias (config forwards to df_grpo_clipped).
+        df_grpo_vggrpo=DiffusionForcingGRPOClipped,
     )
 
     compatible_datasets = dict(
@@ -71,7 +117,7 @@ class VideoPredictionExperiment:
     def __init__(
         self,
         root_cfg: DictConfig,
-        logger: Optional[WandbLogger] = None,
+        logger: Optional[Union[WandbLogger, Iterable[Any], Any]] = None,
         ckpt_path: Optional[Union[str, pathlib.Path]] = None,
     ) -> None:
         """
@@ -79,7 +125,7 @@ class VideoPredictionExperiment:
 
         Args:
             cfg: configuration file that contains everything about the experiment
-            logger: a pytorch-lightning WandbLogger instance
+            logger: WandbLogger, CSVLogger, or a list of Lightning loggers
             ckpt_path: an optional path to saved checkpoint
         """
         self.root_cfg = root_cfg

@@ -1,0 +1,3 @@
+# Deprecated: use `algorithm=df_grpo_clipped` (identical trainer and hyperparameters).
+defaults:
+  - df_grpo_clipped

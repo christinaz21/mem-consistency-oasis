@@ -1,0 +1,79 @@
+# GRPO fine-tuning of the base DiT with DROID reprojection reward
+hydra:
+  run:
+    dir: outputs/grpo/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+defaults:
+  - experiment: exp
+  - dataset: latent_pos
+  - algorithm: df_grpo
+  - model: dit
+  - cluster: null
+
+debug: false
+
+wandb:
+  entity: christinaz
+  project: videogen
+  mode: offline
+
+resume: null
+load: null
+
+name: grpo-droid
+
+experiment:
+  model_ckpt: /u/cz5047/videogen/train-oasis/models/df_20_full_1epoch.bin
+  tasks: [training]
+  training:
+    # Higher than 1e-6 for stronger policy updates; keep bf16-mixed elsewhere.
+    lr: 2e-5
+    precision: bf16-mixed
+    # Use all GPUs Slurm exposes (set CUDA_VISIBLE_DEVICES / --gres). For a fixed
+    # count, use e.g. `devices: 4` instead of -1.
+    devices: -1
+    strategy: ddp
+    batch_size: 1
+    max_epochs: 3
+    max_steps: -1
+    log_every_n_steps: 1
+    checkpointing:
+      every_n_train_steps: 100
+      enable_version_counter: True
+      filename: ckpt-{epoch}-{step}
+      save_top_k: 10
+      monitor: step
+      mode: max # default mode=min breaks periodic saves when monitoring step
+    optim:
+      accumulate_grad_batches: 1
+      gradient_clip_val: 1.0
+  validation:
+    precision: bf16-mixed
+    strategy: ddp
+    batch_size: 1
+    limit_batch: 1
+    val_every_n_step: null
+    val_every_n_epoch: 50
+
+# Override latent_pos dataset fields needed by the algorithm config
+dataset:
+  pre_load: false
+  n_frames: 100
+  context_length: 1
+  frame_skip: 1
+  data_mean: 0.0
+  data_std: 1.0
+  external_cond_dim: 4
+  metadata:
+    - /u/cz5047/videogen/data/20k.json
+    - /u/cz5047/videogen/data/metadata_mem.json
+  limit_video_length:
+    - null
+    - null
+
+model:
+  precision: bf16-mixed
+  # Keep activation checkpointing ON for GRPO: disabling it stores full activations
+  # for T=100 frames and OOMs a single L40. Reentrant checkpoint + requires_grad
+  # on noisy input in DF_GRPO_Trainer avoids prior non-reentrant AMP errors.
+  gradient_checkpointing: true

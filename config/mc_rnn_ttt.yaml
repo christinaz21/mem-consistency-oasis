@@ -1,7 +1,7 @@
 # configuration parsing starts here
 hydra:
   run:
-    dir: outputs/rnn/test
+    dir: outputs/rnn/frame_ttt
 
 defaults:
   - experiment: exp # experiment yaml file name in configurations/experiments folder [fixme]
@@ -13,8 +13,8 @@ defaults:
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
 
 wandb:
-  entity: tychen0028 # wandb account name / organization name [fixme]
-  project: diffusion-forcing # wandb project name; if not provided, defaults to root folder name [fixme]
+  entity: christinaz # wandb account name / organization name [fixme]
+  project: videogen # wandb project name; if not provided, defaults to root folder name [fixme]
   mode: offline # set wandb logging to online, offline or dryrun
 
 resume: null # wandb run id to resume logging and loading checkpoint from
@@ -23,15 +23,15 @@ load: null # wandb run id containing checkpoint or a path to a checkpoint file
 name: mc_rnn_ttt
 
 experiment:
-  model_ckpt: outputs/2025-05-25/07-51-43/checkpoints/epoch=0-step=41000.ckpt # path to a pre-trained diffusion checkpoint
+  model_ckpt: /u/cz5047/videogen/train-oasis/models/df_20_full_1epoch.bin # path to a pre-trained diffusion checkpoint
   tasks: [training]
   training:
     precision: bf16-mixed
     devices: auto
     strategy: deepspeed
-    batch_size: 4
+    batch_size: 2
     max_epochs: -1
-    max_steps: 20000
+    max_steps: 5000
     checkpointing:
       every_n_train_steps: 1000 # Save a checkpoint every 1000 training steps
       enable_version_counter: True
@@ -63,8 +63,8 @@ dataset:
   data_mean: 0.0
   data_std: 1.0
   metadata:
-    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/20k.json
-    - /home/tc0786/Project/train-oasis/data/mem_encoded_data/metadata_mem.json
+    - /u/cz5047/videogen/data/20k.json
+    - /u/cz5047/videogen/data/metadata_mem.json
   limit_video_length:
     - null
     - null

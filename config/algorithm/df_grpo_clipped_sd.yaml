@@ -1,0 +1,29 @@
+# Clipped GRPO with spatial-distance reward (VGGT + Chamfer vs batch ground truth).
+# Trainer: DiffusionForcingGRPOClippedSpatialDistance in DF_GRPO_ClippedSpatialDistance_Trainer.py
+defaults:
+  - df_grpo_clipped
+
+grpo:
+  reward: spatial_distance
+  # Use DDIM transition log-prob ratios (Dance/DDPO-style) for rho.
+  # Must be > 0 (eta=0 is deterministic, density undefined).
+  ddim_logprob_eta: 0.1
+  ddim_logprob_step: 1
+  ddim_logprob_sigma_min: 1e-3
+  spatial_distance:
+    # Override if world-eval-latest is not at ``<train-oasis repo parent>/world-eval-latest``
+    world_eval_root: null
+    # null = use Lightning ``self.device`` when the reconstructor is first built
+    device: null
+    max_frames: 10
+    frame_stride: 1
+    vggt_batch_size: null
+    confidence_threshold: 0.2
+    max_points_per_frame: 200000
+    max_merged_points: 200000
+    chunk_size: 4096
+    seed: 0
+    metric: mean
+    video_fps: 20
+    vggt_repo_dir: null
+    model_path: null

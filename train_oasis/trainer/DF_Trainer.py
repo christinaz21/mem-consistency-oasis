@@ -28,6 +28,7 @@ import lightning.pytorch as pl
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 import torch.distributed as dist
 import os
+import math
 
 class DiffusionForcingVideo(pl.LightningModule):
     def __init__(self, cfg: DictConfig, model_cfg: DictConfig, model_ckpt: str = None):
@@ -557,7 +558,145 @@ class DiffusionForcingVideo(pl.LightningModule):
         )
 
         return x_pred
-    
+
+    def sample_step_with_logprob(
+        self,
+        x: torch.Tensor,
+        external_cond: Optional[torch.Tensor],
+        curr_noise_level: torch.Tensor,
+        next_noise_level: torch.Tensor,
+        *,
+        eta: float,
+        sigma_min: float = 1e-3,
+        prev_sample: Optional[torch.Tensor] = None,
+        model=None,
+    ):
+        """
+        Stochastic DDIM-style step with per-transition log-prob.
+
+        Args:
+            x:               (T, B, C, H, W)
+            external_cond:   (T, B, D) or None
+            curr_noise_level:(T, B) in sampling-step index space [0, sampling_timesteps]
+            next_noise_level:(T, B) in sampling-step index space [0, sampling_timesteps]
+            eta:             > 0 for stochastic transition
+            sigma_min:       lower bound for stddev
+            prev_sample:     if provided, score this exact transition instead of sampling anew
+            model:           policy to use; defaults to self.diffusion_model
+
+        Returns:
+            x_next:          sampled / provided next latent, same shape as x
+            log_prob:        (T, B) transition log-prob
+            active_mask:     (T, B) where curr != next
+            clipped_curr:    (T, B) real timestep indices used for model forward
+        """
+        if eta <= 0:
+            raise ValueError("eta must be > 0 for stochastic GRPO log-probs")
+
+        if model is None:
+            model = self.diffusion_model
+
+        # map scheduler indices [0..sampling_timesteps] -> real train diffusion indices [-1..timesteps-1]
+        real_steps = torch.linspace(
+            -1, self.timesteps - 1, steps=self.sampling_timesteps + 1, device=x.device
+        ).long()
+
+        curr_real = real_steps[curr_noise_level]
+        next_real = real_steps[next_noise_level]
+
+        # same stabilization handling as your existing sample_step
+        clipped_curr = torch.where(
+            curr_real < 0,
+            torch.full_like(curr_real, self.stabilization_level - 1, dtype=torch.long),
+            curr_real,
+        )
+
+        orig_x = x
+        scaled_context = self.q_sample(
+            x,
+            clipped_curr,
+            noise=torch.zeros_like(x),
+        )
+        x_in = torch.where(self.add_shape_channels(curr_real < 0), scaled_context, orig_x)
+
+        model_pred = model(
+            x=rearrange(x_in, "t b ... -> b t ..."),
+            t=rearrange(clipped_curr, "t b -> b t"),
+            external_cond=(
+                rearrange(external_cond, "t b ... -> b t ...")
+                if external_cond is not None
+                else None
+            ),
+        )
+        model_pred = rearrange(model_pred, "b t ... -> t b ...")
+
+        if self.predict_v:
+            x_start = self.predict_start_from_v(x_in, clipped_curr, model_pred)
+        else:
+            x_start = model_pred
+
+        pred_noise = self.predict_noise_from_start(x_in, clipped_curr, x_start)
+
+        # active positions are the ones whose noise level actually changes
+        active_mask = curr_real != next_real
+
+        # alpha_t and alpha_prev in real diffusion-time index space
+        alpha_t = torch.ones_like(curr_real, dtype=torch.float32, device=x.device)
+        alpha_prev = torch.ones_like(next_real, dtype=torch.float32, device=x.device)
+
+        pos_curr = curr_real >= 0
+        pos_prev = next_real >= 0
+        alpha_t[pos_curr] = self.alphas_cumprod[curr_real[pos_curr]]
+        alpha_prev[pos_prev] = self.alphas_cumprod[next_real[pos_prev]]
+
+        # variance only matters on active positions
+        variance = torch.zeros_like(alpha_t)
+        active_idx = active_mask & pos_curr
+        if active_idx.any():
+            at = alpha_t[active_idx]
+            ap = alpha_prev[active_idx]
+            variance[active_idx] = ((1.0 - ap) / (1.0 - at)) * (1.0 - at / ap)
+            variance[active_idx] = torch.clamp(variance[active_idx], min=1e-20)
+
+        bc = (1,) * (x.ndim - 2)
+        alpha_prev_b = alpha_prev.view(*alpha_prev.shape, *bc)
+
+        sigma = eta * variance.sqrt()
+        sigma = torch.clamp(sigma, min=0.0)
+        sigma_b = sigma.view(*sigma.shape, *bc)
+
+        dir_coeff = torch.clamp(1.0 - alpha_prev_b - sigma_b * sigma_b, min=0.0).sqrt()
+        prev_mean = x_start * alpha_prev_b.sqrt() + pred_noise * dir_coeff
+
+        if prev_sample is None:
+            z = torch.randn_like(x)
+            sampled = prev_mean + sigma_b * z
+        else:
+            sampled = prev_sample
+
+        # unchanged positions should stay identical
+        x_next = torch.where(self.add_shape_channels(active_mask), sampled, orig_x)
+
+        # log prob only defined / needed on active positions
+        log_prob = torch.zeros_like(curr_real, dtype=torch.float32)
+        if active_idx.any():
+            sigma_eval = torch.clamp(sigma[active_idx], min=sigma_min)
+            mean_eval = prev_mean[active_idx]
+            sample_eval = sampled[active_idx]
+
+            expand = (None,) * (sample_eval.ndim - 1)
+            sigma_b = sigma_eval[(slice(None),) + expand]
+
+            lp = (
+                -((sample_eval.detach().float() - mean_eval.float()) ** 2)
+                / (2.0 * sigma_b ** 2)
+                - torch.log(sigma_b)
+                - 0.5 * math.log(2.0 * math.pi)
+            )
+            log_prob[active_idx] = lp.mean(dim=tuple(range(1, lp.ndim)))
+
+        return x_next, log_prob, active_mask, clipped_curr
+        
     def on_validation_epoch_end(self, namespace="validation") -> None:
         if not self.validation_step_outputs:
             return

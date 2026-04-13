@@ -25,6 +25,19 @@ from torchmetrics.functional import (
 )
 import argparse
 from train_oasis.utils import load_prompt, load_actions
+import os, sys
+# sys.path.append("/n/fs/videogen/train-oasis/train_oasis/inference")
+# from worldscore import DroidReprojectionScorer
+
+torch.backends.cuda.enable_mem_efficient_sdp(False)
+torch.backends.cuda.enable_flash_sdp(False)
+torch.backends.cuda.enable_math_sdp(True)
+
+import subprocess
+import tempfile
+import shutil
+import re
+import cv2
 
 @torch.no_grad()
 def get_validation_metrics_for_videos(
@@ -454,6 +467,15 @@ def rnn_frame_inference(args):
     os.makedirs(video_save_dir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # # initialize the droid-slam scorer
+    # scorer = DroidReprojectionScorer(
+    #     weights_path="/u/cz5047/videogen/data/models/droid_models/droid.pth",          # add CLI arg
+    #     stride=getattr(args, "droid_stride", 2),
+    #     max_frames=getattr(args, "droid_max_frames", 200),
+    #     resize_long_side=getattr(args, "droid_resize", 256),
+    #     quiet=True,
+    # )
+
     if args.vae_name == "oasis":
         from train_oasis.model.vae import AutoencoderKL
         from safetensors.torch import load_model
@@ -550,25 +572,42 @@ def rnn_frame_inference(args):
     all_metrics = []
     prompts, gt_videos, all_actions, save_paths = get_data(args)
 
-    for start_idx in range(0, len(prompts), args.batch_size):
-        # sampling inputs
-        # x = prompts[start_idx]
-        x = torch.cat(prompts[start_idx : start_idx + args.batch_size], dim=0)
-        # actions = all_actions[start_idx]
-        actions = torch.cat(all_actions[start_idx : start_idx + args.batch_size], dim=0)
-        B = x.shape[0]
-        H, W = x.shape[-2:]
-        # assert B == batch_size, f"{B} != {batch_size}"
-        # x = torch.randn((B, 1, *x.shape[-3:]), device=device) # (B, 1, C, H, W)
-        # x = torch.clamp(x, -noise_abs_max, +noise_abs_max)
-        x = x.to(device)
+    ### GENERATE ONE CANDIDATE VIDEO FOR EACH PROMPT
+    def _generate_one_candidate(x_prompt, actions, seed: int):
+
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+
+        B = x_prompt.shape[0]
+        H, W = x_prompt.shape[-2:]
+        n_prompt_frames = x_prompt.shape[1]
+        total_frames = actions.shape[1]
+
+        x = x_prompt.to(device)
         actions = actions.to(device)
 
-        # vae encoding
-        n_prompt_frames = x.shape[1]
-        total_frames = actions.shape[1]
         x = rearrange(x, "b t c h w -> (b t) c h w")
         all_frames = []
+        
+        # for start_idx in range(0, len(prompts), args.batch_size):
+        #     # sampling inputs
+        #     # x = prompts[start_idx]
+        #     x = torch.cat(prompts[start_idx : start_idx + args.batch_size], dim=0)
+        #     # actions = all_actions[start_idx]
+        #     actions = torch.cat(all_actions[start_idx : start_idx + args.batch_size], dim=0)
+        #     B = x.shape[0]
+        #     H, W = x.shape[-2:]
+        #     # assert B == batch_size, f"{B} != {batch_size}"
+        #     # x = torch.randn((B, 1, *x.shape[-3:]), device=device) # (B, 1, C, H, W)
+        #     # x = torch.clamp(x, -noise_abs_max, +noise_abs_max)
+        #     x = x.to(device)
+        #     actions = actions.to(device)
+
+        #     # vae encoding
+        #     n_prompt_frames = x.shape[1]
+        #     total_frames = actions.shape[1]
+        #     x = rearrange(x, "b t c h w -> (b t) c h w")
+        #     all_frames = []
         
         if args.vae_name == "sd_vae":
             with torch.no_grad():
@@ -665,29 +704,201 @@ def rnn_frame_inference(args):
                 x = torch.cat(all_frames, dim=0)
         else:
             raise ValueError(f"Unknown VAE name: {args.vae_name}")
-        x = rearrange(x, "(b t) c h w -> b t h w c", b=B, t=total_frames)
+        x_dec = rearrange(x, "(b t) c h w -> b t h w c", b=B, t=total_frames)
+        return x_dec
 
-        for idx in range(B):
-            # save video
-            video = x[idx]
-            video = torch.clamp(video, 0, 1)
-            gt_video = gt_videos[start_idx + idx].to(device)
-            metrics = get_validation_metrics_for_videos(video.permute(0, 3, 1, 2).unsqueeze(1), gt_video.permute(0, 3, 1, 2).unsqueeze(1))
+
+        # for idx in range(B):
+        #     # save video
+        #     video = x[idx]
+        #     video = torch.clamp(video, 0, 1)
+        #     gt_video = gt_videos[start_idx + idx].to(device)
+        #     metrics = get_validation_metrics_for_videos(video.permute(0, 3, 1, 2).unsqueeze(1), gt_video.permute(0, 3, 1, 2).unsqueeze(1))
+        #     all_metrics.append({
+        #         "prompt_frames": n_prompt_frames,
+        #         "metrics": metrics
+        #     })
+        #     video = video.cpu()
+        #     video = (video * 255).byte()
+        #     output_path = save_paths[start_idx + idx]
+        #     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        #     write_video(output_path, video, fps=fps)
+
+    # -------------------------
+    # Main loop with Best-of-N
+    # -------------------------
+    num_particles = 4
+    base_seed = 0
+
+    for start_idx in range(0, len(prompts), args.batch_size):
+        x_prompt = torch.cat(prompts[start_idx : start_idx + args.batch_size], dim=0)   # [B,Tp,C,H,W]
+        actions = torch.cat(all_actions[start_idx : start_idx + args.batch_size], dim=0)  # [B,T,A]
+        B = x_prompt.shape[0]
+        n_prompt_frames = x_prompt.shape[1]
+
+        # Generate N candidates
+        candidate_videos = []
+        candidate_scores = np.zeros((num_particles, B), dtype=np.float32)
+
+        for p in range(num_particles):
+            seed = base_seed + p + 1000 * (start_idx // args.batch_size)
+            x_dec = _generate_one_candidate(x_prompt, actions, seed=seed)  # [B,T,H,W,C]
+            candidate_videos.append(x_dec)
+
+            # score each sample in batch
+            for b in range(B):
+                candidate_scores[p, b] = score_video_tensor_with_droid_eval(
+                    x_dec[b],
+                    calib_path=getattr(args, "droid_calib", "/u/cz5047/videogen/DROID-SLAM/calib/test.txt"),
+                    weights=getattr(args, "droid_weights", "/u/cz5047/videogen/data/models/droid_models/droid.pth"),
+                    stride=getattr(args, "droid_stride", 2),
+                    max_frames=getattr(args, "droid_max_frames", 200),
+                    resize_long_side=getattr(args, "droid_resize", 256),
+                    buffer=getattr(args, "droid_buffer", 512),
+                    upsample=getattr(args, "droid_upsample", True),
+                )
+
+        # Pick best per sample
+        best_p = candidate_scores.argmax(axis=0)  # [B]
+        best_scores = candidate_scores[best_p, np.arange(B)]
+
+        # Save + metrics using chosen candidate
+        for b in range(B):
+            x_best = candidate_videos[int(best_p[b])][b]
+            x_best = torch.clamp(x_best, 0, 1)
+
+            gt_video = gt_videos[start_idx + b].to(device)
+            metrics = get_validation_metrics_for_videos(
+                x_best.permute(0, 3, 1, 2).unsqueeze(1),
+                gt_video.permute(0, 3, 1, 2).unsqueeze(1),
+            )
+
             all_metrics.append({
-                "prompt_frames": n_prompt_frames,
-                "metrics": metrics
+                "prompt_frames": int(n_prompt_frames),
+                "metrics": metrics,
+                "droid_reward": float(best_scores[b]),
+                "selected_particle": int(best_p[b]),
             })
-            video = video.cpu()
-            video = (video * 255).byte()
-            output_path = save_paths[start_idx + idx]
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            write_video(output_path, video, fps=fps)
+
+            # write video
+            out_path = save_paths[start_idx + b]
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            v8 = (x_best.detach().cpu() * 255).byte()
+            write_video(out_path, v8, fps=fps)
 
     # save metrics
     metrics_save_path = os.path.join(args.save_dir, "metrics.json")
     os.makedirs(os.path.dirname(metrics_save_path), exist_ok=True)
-    with open(metrics_save_path, 'w') as f:
+    with open(metrics_save_path, "w") as f:
         json.dump(all_metrics, f, indent=4)
+        
+
+
+
+
+
+def _write_video_frames_png(video_thwc: torch.Tensor, out_dir: str, max_frames: int = 200, resize_long_side: int = 256):
+    """
+    video_thwc: (T,H,W,C) float in [0,1], torch tensor (cpu or cuda)
+    Writes PNG frames to out_dir. Returns out_dir.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    v = torch.clamp(video_thwc, 0, 1)
+    if v.is_cuda:
+        v = v.detach().cpu()
+    v = (v * 255).byte().numpy()  # uint8 RGB
+    T = min(v.shape[0], max_frames)
+
+    for t in range(T):
+        rgb = v[t]  # (H,W,3) RGB uint8
+        if resize_long_side is not None and resize_long_side > 0:
+            h, w = rgb.shape[:2]
+            long_side = max(h, w)
+            if long_side > resize_long_side:
+                scale = resize_long_side / float(long_side)
+                nh, nw = int(round(h * scale)), int(round(w * scale))
+                rgb = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_AREA)
+
+        bgr = rgb[..., ::-1]  # cv2 wants BGR
+        fp = os.path.join(out_dir, f"{t:06d}.png")
+        ok = cv2.imwrite(fp, bgr)
+        if not ok:
+            raise RuntimeError(f"cv2.imwrite failed for {fp}")
+
+    return out_dir
+
+
+def score_with_droid_eval(imagedir: str, calib_path: str, weights: str, stride: int = 1, buffer: int = 512, upsample: bool = True):
+    """
+    Runs scoring in the separate 'droid_eval' conda env and returns mean reprojection error (float).
+    Assumes score_reproj.py prints something like: 'mean_reprojection_error: <float>'
+    """
+    upsample_flag = "--upsample" if upsample else ""
+
+    # Use conda.sh (more reliable than relying on ~/.bashrc)
+    bash_cmd = (
+        "set -euo pipefail; "
+        "source \"$(conda info --base)/etc/profile.d/conda.sh\"; "
+        "conda activate droid; "
+        "python /n/fs/videogen/train-oasis/train_oasis/inference/score_reproj.py "
+        f"--imagedir \"{imagedir}\" "
+        f"--calib \"{calib_path}\" "
+        f"--weights \"{weights}\" "
+        f"--stride {int(stride)} "
+        f"--buffer {int(buffer)} "
+        f"{upsample_flag}"
+    )
+
+    out = subprocess.check_output(["/bin/bash", "-lc", bash_cmd], text=True)
+
+    # Parse the float robustly
+    m = re.search(r"mean_reprojection_error:\s*([0-9]*\.?[0-9]+([eE][-+]?\d+)?)", out)
+    if m:
+        return float(m.group(1))
+
+    # fallback: last token
+    toks = out.strip().split()
+    if len(toks) == 0:
+        raise RuntimeError(f"Empty output from scorer. Raw output:\n{out}")
+    return float(toks[-1])
+
+
+def score_video_tensor_with_droid_eval(
+    video_thwc: torch.Tensor,
+    calib_path: str,
+    weights: str,
+    stride: int = 2,
+    max_frames: int = 200,
+    resize_long_side: int = 256,
+    buffer: int = 512,
+    upsample: bool = True,
+) -> float:
+    """
+    Writes frames to a temp dir, calls droid_eval scorer, returns reward = -mean_error.
+    """
+    tmpdir = tempfile.mkdtemp(prefix="droid_eval_frames_")
+    try:
+        _write_video_frames_png(video_thwc, tmpdir, max_frames=max_frames, resize_long_side=resize_long_side)
+        mean_err = score_with_droid_eval(
+            imagedir=tmpdir,
+            calib_path=calib_path,
+            weights=weights,
+            stride=stride,
+            buffer=buffer,
+            upsample=upsample,
+        )
+        if not np.isfinite(mean_err):
+            return -1e9
+        return -float(mean_err)  # reward
+    except Exception as e:
+        # If DROID fails on a sample, give a terrible reward so it won't be selected
+        return -1e9
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+
 
 if __name__ == "__main__":
     # get_metrics()
@@ -706,6 +917,13 @@ if __name__ == "__main__":
     parser.add_argument('--rnn_type', type=str, default='LSTM', help='RNN type', choices=['LSTM', 'Mamba', 'TTT'])
     parser.add_argument('--total_frames', type=int, default=20, help='Total frames to generate during inference, will deprecate when using maze15 dataset')
     parser.add_argument('--prompt_frames', type=int, default=10, help='Number of clean frames during inference, will deprecate when using maze15 dataset')
+    parser.add_argument("--droid_calib", type=str, default="/u/cz5047/videogen/DROID-SLAM/calib/test.txt")
+    parser.add_argument("--droid_weights", type=str, default="/u/cz5047/videogen/data/models/droid_models/droid.pth")
+    parser.add_argument("--droid_stride", type=int, default=2)
+    parser.add_argument("--droid_max_frames", type=int, default=200)
+    parser.add_argument("--droid_resize", type=int, default=256)
+    parser.add_argument("--droid_buffer", type=int, default=512)
+    parser.add_argument("--droid_upsample", action="store_true")
     args = parser.parse_args()
     if args.inference_type == 'chunkwise':
         rnn_chunk_inference(args)
