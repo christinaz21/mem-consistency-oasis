@@ -9,7 +9,6 @@ grpo:
   # Must be > 0 (eta=0 is deterministic, density undefined).
   ddim_logprob_eta: 0.1
   ddim_logprob_step: 1
-  ddim_logprob_sigma_min: 1e-3
   spatial_distance:
     # Override if world-eval-latest is not at ``<train-oasis repo parent>/world-eval-latest``
     world_eval_root: null

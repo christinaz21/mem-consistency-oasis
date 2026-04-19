@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:4
-#SBATCH --time=47:59:00
+#SBATCH --time=71:59:00
 #SBATCH --output=/n/fs/videogen/train-oasis/output/logs/grpo-clipped-sd-%J.log
 #SBATCH --error=/n/fs/videogen/train-oasis/output/logs/grpo-clipped-sd-%J.log
 #SBATCH --mail-type=all

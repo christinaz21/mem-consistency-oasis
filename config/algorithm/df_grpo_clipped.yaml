@@ -7,8 +7,3 @@ grpo:
   clip_epsilon: 0.2
   logprob_var: 1.0
   log_ratio_clamp: 20.0
-  # Use DDIM transition log-prob ratios for rho (Dance/DDPO-style).
-  # Requires eta > 0 (eta=0 is deterministic, log-prob undefined).
-  ddim_logprob_eta: 0.1
-  ddim_logprob_step: 1
-  ddim_logprob_sigma_min: 1e-3
