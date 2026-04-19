@@ -4,9 +4,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=24G
+#SBATCH --mem=16G
 #SBATCH --gres=gpu:1
-#SBATCH --time=23:59:00
+#SBATCH --time=11:59:00
 #SBATCH --output=/n/fs/videogen/train-oasis/output/logs/memory-consistency-%J.log
 #SBATCH --error=/n/fs/videogen/train-oasis/output/logs/memory-consistency-%J.log
 #SBATCH --mail-type=all
@@ -48,22 +48,24 @@ BATCH_SIZE=8
 INVERT_FLAG="--invert-score"
 
 python /u/cz5047/videogen/train-oasis/train_oasis/inference/plot_memory_consistency_vs_time.py \
-  --method "baseline=${BASELINE_DIR}" \
-  --method "droid_bon=${DROID_BON_DIR}" \
-  --method "droid_grpo=${DROID_GRPO_DIR}" \
   --method "sd_bon=${SD_BON_DIR}" \
   --method "sd_grpo=${SD_GRPO_DIR}" \
   --reference-root "${REFERENCE_ROOT}" \
-  --output-dir "${OUTPUT_DIR}" \
+  --output-dir /u/cz5047/videogen/train-oasis/outputs/memory_consistency/2026-04-13/05-18-25 \
   --compute-droid \
-  --compute-spatial-distance \
-  --plot-metric memory_error \
+  --plot-metrics ssim,psnr,lpips \
   --device cuda \
   --batch-size "${BATCH_SIZE}" \
   --start-frame "${START_FRAME}" \
   --end-frame "${END_FRAME}" \
   --stride "${STRIDE}" \
+  --reuse-existing \
   ${INVERT_FLAG}
 
 echo "Done. Outputs written to: ${OUTPUT_DIR}"
 
+  # --output-dir /u/cz5047/videogen/train-oasis/outputs/memory_consistency/2026-04-13/05-18-25 \
+# --compute-spatial-distance \
+  # --method "droid_bon=${DROID_BON_DIR}" \
+  # --method "droid_grpo=${DROID_GRPO_DIR}" \
+    # --method "baseline=${BASELINE_DIR}" \

@@ -7,6 +7,36 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+PLOT_METRIC_CHOICES = [
+    "memory_error",
+    "droid_score",
+    "spatial_distance_mean",
+    "spatial_distance_max",
+    "ssim",
+    "psnr",
+    "lpips",
+]
+
+
+def summary_to_metrics(summary: dict) -> dict:
+    return {
+        "droid_score": summary.get("mean_droid_score"),
+        "spatial_distance_mean": summary.get("mean_spatial_distance_mean"),
+        "spatial_distance_max": summary.get("mean_spatial_distance_max"),
+        "ssim": summary.get("mean_ssim"),
+        "psnr": summary.get("mean_psnr"),
+        "lpips": summary.get("mean_lpips"),
+    }
+
+
+def load_existing_metrics(step_output_dir: Path) -> dict | None:
+    summary_path = step_output_dir / "summary.json"
+    if not summary_path.is_file():
+        return None
+    with summary_path.open("r") as f:
+        summary = json.load(f)
+    return summary_to_metrics(summary)
+
 
 def parse_method_arg(method_arg: str) -> tuple[str, str]:
     if "=" not in method_arg:
@@ -28,8 +58,8 @@ def run_eval_videos(
     output_dir: Path,
     max_frames: int,
     args: argparse.Namespace,
+    step_output_dir: Path,
 ) -> dict:
-    step_output_dir = output_dir / "raw" / method_name / f"frames_{max_frames:04d}"
     step_output_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -116,11 +146,54 @@ def run_eval_videos(
     summary_path = step_output_dir / "summary.json"
     with summary_path.open("r") as f:
         summary = json.load(f)
-    return {
-        "droid_score": summary.get("mean_droid_score"),
-        "spatial_distance_mean": summary.get("mean_spatial_distance_mean"),
-        "spatial_distance_max": summary.get("mean_spatial_distance_max"),
-    }
+    return summary_to_metrics(summary)
+
+
+def value_for_metric(plot_metric: str, metrics: dict, invert_score: bool) -> float | None:
+    if plot_metric == "memory_error":
+        droid_score = metrics["droid_score"]
+        if droid_score is None:
+            return None
+        return -droid_score if invert_score else droid_score
+    value = metrics.get(plot_metric)
+    if value is None:
+        return None
+    return float(value)
+
+
+def plot_series(
+    rows: list[dict],
+    methods: list[tuple[str, str]],
+    plot_metric: str,
+    output_dir: Path,
+    plot_title: str,
+):
+    plt.figure(figsize=(8, 5))
+    for method_name, _ in methods:
+        xs = [r["frame"] for r in rows if r["method"] == method_name and r[plot_metric] is not None]
+        ys = [r[plot_metric] for r in rows if r["method"] == method_name and r[plot_metric] is not None]
+        if xs:
+            plt.plot(xs, ys, marker="o", label=method_name)
+
+    plt.title(plot_title)
+    plt.xlabel("Timestep / Frame Index")
+    y_label = {
+        "memory_error": "Memory Error (DROID reprojection)",
+        "droid_score": "DROID Reprojection Score",
+        "spatial_distance_mean": "Spatial Distance (mean)",
+        "spatial_distance_max": "Spatial Distance (max)",
+        "ssim": "SSIM",
+        "psnr": "PSNR",
+        "lpips": "LPIPS",
+    }[plot_metric]
+    plt.ylabel(y_label)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    png_path = output_dir / f"memory_consistency_vs_time_{plot_metric}.png"
+    plt.savefig(png_path, dpi=200)
+    plt.close()
+    return png_path
 
 
 def main():
@@ -176,16 +249,22 @@ def main():
         "--plot-metric",
         type=str,
         default="memory_error",
-        choices=[
-            "memory_error",
-            "droid_score",
-            "spatial_distance_mean",
-            "spatial_distance_max",
-        ],
+        choices=PLOT_METRIC_CHOICES,
         help=(
             "Metric to plot on y-axis. memory_error uses droid_score and applies "
             "--invert-score when enabled."
         ),
+    )
+    parser.add_argument(
+        "--plot-metrics",
+        type=str,
+        default=None,
+        help="Comma-separated metrics to plot in one run (e.g. ssim,psnr,lpips). Overrides --plot-metric.",
+    )
+    parser.add_argument(
+        "--reuse-existing",
+        action="store_true",
+        help="Reuse existing raw/<method>/frames_XXXX/summary.json files and skip re-evaluation for those steps.",
     )
     parser.add_argument("--verbose", action="store_true")
 
@@ -234,11 +313,15 @@ def main():
         parser.error("--start-frame, --end-frame, and --stride must be positive")
     if args.start_frame > args.end_frame:
         parser.error("--start-frame must be <= --end-frame")
-    if not args.compute_droid and not args.compute_spatial_distance:
+    if not args.reuse_existing and not args.compute_droid and not args.compute_spatial_distance:
         parser.error("Enable at least one metric: --compute-droid and/or --compute-spatial-distance")
-    if args.plot_metric in {"memory_error", "droid_score"} and not args.compute_droid:
+    if args.plot_metric in {"memory_error", "droid_score"} and not (
+        args.compute_droid or args.reuse_existing
+    ):
         parser.error("--plot-metric requires --compute-droid")
-    if args.plot_metric.startswith("spatial_distance") and not args.compute_spatial_distance:
+    if args.plot_metric.startswith("spatial_distance") and not (
+        args.compute_spatial_distance or args.reuse_existing
+    ):
         parser.error("--plot-metric requires --compute-spatial-distance")
 
     eval_script = Path(args.eval_script).resolve()
@@ -250,40 +333,58 @@ def main():
 
     methods = [parse_method_arg(m) for m in args.method]
     frame_steps = list(range(args.start_frame, args.end_frame + 1, args.stride))
+    if args.plot_metrics:
+        selected_plot_metrics = [m.strip() for m in args.plot_metrics.split(",") if m.strip()]
+    else:
+        selected_plot_metrics = [args.plot_metric]
+    invalid_metrics = [m for m in selected_plot_metrics if m not in PLOT_METRIC_CHOICES]
+    if invalid_metrics:
+        parser.error(f"Invalid metrics in --plot-metrics: {invalid_metrics}")
+    for m in selected_plot_metrics:
+        if m in {"memory_error", "droid_score"} and not args.compute_droid:
+            if not args.reuse_existing:
+                parser.error(f"{m} requires --compute-droid")
+        if m.startswith("spatial_distance") and not args.compute_spatial_distance:
+            if not args.reuse_existing:
+                parser.error(f"{m} requires --compute-spatial-distance")
 
     series_rows = []
     for method_name, method_root in methods:
         for frame_idx in frame_steps:
-            metrics = run_eval_videos(
-                eval_script=eval_script,
-                method_name=method_name,
-                generated_root=method_root,
-                output_dir=output_dir,
-                max_frames=frame_idx,
-                args=args,
-            )
+            step_output_dir = output_dir / "raw" / method_name / f"frames_{frame_idx:04d}"
+            metrics = None
+            if args.reuse_existing:
+                metrics = load_existing_metrics(step_output_dir=step_output_dir)
+            if metrics is None:
+                if args.reuse_existing and not (args.compute_droid or args.compute_spatial_distance):
+                    raise RuntimeError(
+                        "Missing cached summary for replot-only mode at "
+                        f"{step_output_dir / 'summary.json'}"
+                    )
+                metrics = run_eval_videos(
+                    eval_script=eval_script,
+                    method_name=method_name,
+                    generated_root=method_root,
+                    output_dir=output_dir,
+                    max_frames=frame_idx,
+                    args=args,
+                    step_output_dir=step_output_dir,
+                )
             droid_score = metrics["droid_score"]
             sd_mean = metrics["spatial_distance_mean"]
             sd_max = metrics["spatial_distance_max"]
+            ssim = metrics["ssim"]
+            psnr = metrics["psnr"]
+            lpips = metrics["lpips"]
 
-            if args.plot_metric == "memory_error":
-                if droid_score is None:
-                    continue
-                y_value = -droid_score if args.invert_score else droid_score
-            elif args.plot_metric == "droid_score":
-                if droid_score is None:
-                    continue
-                y_value = droid_score
-            elif args.plot_metric == "spatial_distance_mean":
-                if sd_mean is None:
-                    continue
-                y_value = sd_mean
-            else:
-                if sd_max is None:
-                    continue
-                y_value = sd_max
-
-            if droid_score is None and sd_mean is None and sd_max is None:
+            if (
+                droid_score is None
+                and sd_mean is None
+                and sd_max is None
+                and ssim is None
+                and psnr is None
+                and lpips is None
+            ):
                 continue
             series_rows.append(
                 {
@@ -292,13 +393,16 @@ def main():
                     "droid_score": droid_score,
                     "spatial_distance_mean": sd_mean,
                     "spatial_distance_max": sd_max,
-                    "memory_error": y_value,
+                    "ssim": ssim,
+                    "psnr": psnr,
+                    "lpips": lpips,
+                    "memory_error": value_for_metric("memory_error", metrics, args.invert_score),
                 }
             )
             print(
                 f"[{method_name}] frames<= {frame_idx:4d} | "
                 f"droid={droid_score} | sd_mean={sd_mean} | sd_max={sd_max} | "
-                f"plot_value={y_value}"
+                f"ssim={ssim} | psnr={psnr} | lpips={lpips}"
             )
 
     if not series_rows:
@@ -314,34 +418,25 @@ def main():
                 "droid_score",
                 "spatial_distance_mean",
                 "spatial_distance_max",
+                "ssim",
+                "psnr",
+                "lpips",
                 "memory_error",
             ],
         )
         writer.writeheader()
         writer.writerows(series_rows)
 
-    plt.figure(figsize=(8, 5))
-    for method_name, _ in methods:
-        xs = [r["frame"] for r in series_rows if r["method"] == method_name]
-        ys = [r["memory_error"] for r in series_rows if r["method"] == method_name]
-        if xs:
-            plt.plot(xs, ys, marker="o", label=method_name)
-
-    plt.title(args.plot_title)
-    plt.xlabel("Timestep / Frame Index")
-    y_label = {
-        "memory_error": "Memory Error (DROID reprojection)",
-        "droid_score": "DROID Reprojection Score",
-        "spatial_distance_mean": "Spatial Distance (mean)",
-        "spatial_distance_max": "Spatial Distance (max)",
-    }[args.plot_metric]
-    plt.ylabel(y_label)
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-
-    png_path = output_dir / "memory_consistency_vs_time.png"
-    plt.savefig(png_path, dpi=200)
+    generated_plot_paths = []
+    for metric in selected_plot_metrics:
+        png_path = plot_series(
+            rows=series_rows,
+            methods=methods,
+            plot_metric=metric,
+            output_dir=output_dir,
+            plot_title=args.plot_title,
+        )
+        generated_plot_paths.append(str(png_path))
 
     summary_path = output_dir / "memory_consistency_vs_time_summary.json"
     with summary_path.open("w") as f:
@@ -350,11 +445,12 @@ def main():
                 "frame_steps": frame_steps,
                 "methods": [m[0] for m in methods],
                 "csv_path": str(csv_path),
-                "plot_path": str(png_path),
+                "plot_paths": generated_plot_paths,
                 "invert_score": args.invert_score,
-                "plot_metric": args.plot_metric,
+                "plot_metrics": selected_plot_metrics,
                 "compute_droid": args.compute_droid,
                 "compute_spatial_distance": args.compute_spatial_distance,
+                "reuse_existing": args.reuse_existing,
             },
             f,
             indent=2,
@@ -362,7 +458,8 @@ def main():
 
     print("\nDone.")
     print(f"CSV: {csv_path}")
-    print(f"Plot: {png_path}")
+    for p in generated_plot_paths:
+        print(f"Plot: {p}")
     print(f"Summary: {summary_path}")
 
 
